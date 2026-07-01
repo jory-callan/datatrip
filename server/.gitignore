@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# logs
+logs/
+*.log
+
+# local runtime sqlite files
+*.sqlite.db
+*.db
+
+# build artifacts
+/bin/
+/dist/
+/tmp/
+
+config.yaml
+config.yml

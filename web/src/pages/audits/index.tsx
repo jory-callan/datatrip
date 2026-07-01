@@ -1,0 +1,1 @@
+export { AuditsPage } from './page'

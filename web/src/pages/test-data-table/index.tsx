@@ -1,0 +1,1 @@
+export { TestDataTablePage } from './page'

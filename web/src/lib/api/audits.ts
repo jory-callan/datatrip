@@ -1,0 +1,62 @@
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+
+import { apiClient } from '../api-client'
+
+export interface AuditLog {
+  id: number
+  actor_id: number
+  project_id: number
+  datasource_id: number
+  action: string
+  sql: string
+  classification: string
+  status: string
+  duration_ms: number
+  error_message?: string
+  ticket_id?: number
+  ip: string
+  created_at: string
+}
+
+export interface AuditListParams {
+  page: number
+  pageSize: number
+  needCount?: boolean
+  actor_id?: number
+  project_id?: number
+  datasource_id?: number
+  action?: string
+  status?: string
+  classification?: string
+  start_time?: string
+  end_time?: string
+}
+
+export interface AuditListResponse {
+  list: AuditLog[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export const useAudits = ({ page, pageSize, needCount = true, actor_id, project_id, datasource_id, action, status, classification, start_time, end_time }: AuditListParams) => {
+  return useQuery({
+    queryKey: ['audits', page, pageSize, needCount, actor_id ?? '', project_id ?? '', datasource_id ?? '', action ?? '', status ?? '', classification ?? '', start_time ?? '', end_time ?? ''],
+    queryFn: () => apiClient<AuditListResponse>('/audits', {
+      query: {
+        page,
+        page_size: pageSize,
+        need_count: String(needCount),
+        ...(actor_id ? { actor_id: String(actor_id) } : {}),
+        ...(project_id ? { project_id: String(project_id) } : {}),
+        ...(datasource_id ? { datasource_id: String(datasource_id) } : {}),
+        ...(action ? { action } : {}),
+        ...(status ? { status } : {}),
+        ...(classification ? { classification } : {}),
+        ...(start_time ? { start_time } : {}),
+        ...(end_time ? { end_time } : {}),
+      },
+    }),
+    placeholderData: keepPreviousData,
+  })
+}
