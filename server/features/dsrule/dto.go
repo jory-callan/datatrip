@@ -2,41 +2,43 @@ package dsrule
 
 import (
 	"time"
-
-	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
 )
 
 type DTO struct {
-	ID        uint      `json:"id"`
+	ID        string    `json:"id"`
 	Name      string    `json:"name"`
-	DBType    string    `json:"db_type"`
+	TypeGroup string    `json:"type_group"`
+	TypeScope string    `json:"type_scope"`
 	Category  string    `json:"category"`
 	Pattern   string    `json:"pattern"`
 	Enabled   bool      `json:"enabled"`
+	Priority  int       `json:"priority"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-type ListQuery struct {
-	response.PageQuery
-	DBType   string `query:"db_type" json:"db_type"`
-	Category string `query:"category" json:"category"`
-	Enabled  string `query:"enabled" json:"enabled"`
+type CreateRequest struct {
+	Name      string `json:"name"`
+	TypeGroup string `json:"type_group"`
+	TypeScope string `json:"type_scope"`
+	Category  string `json:"category"`
+	Pattern   string `json:"pattern"`
+	Enabled   bool   `json:"enabled"`
+	Priority  int    `json:"priority"`
 }
 
-type CreateRequest struct {
-	Name     string `json:"name"`
-	DBType   string `json:"db_type"`
-	Category string `json:"category"`
-	Pattern  string `json:"pattern"`
-	Enabled  bool   `json:"enabled"`
+type BatchDeleteRequest struct {
+	IDs []string `json:"ids"`
 }
 
 type UpdateRequest struct {
-	Name     string `json:"name"`
-	Category string `json:"category"`
-	Pattern  string `json:"pattern"`
-	Enabled  *bool  `json:"enabled"`
+	Name      string `json:"name"`
+	TypeGroup string `json:"type_group"`
+	TypeScope string `json:"type_scope"`
+	Category  string `json:"category"`
+	Pattern   string `json:"pattern"`
+	Enabled   *bool  `json:"enabled"`
+	Priority  *int   `json:"priority"`
 }
 
 func ToDTO(r *DatasourceRule) *DTO {
@@ -46,10 +48,12 @@ func ToDTO(r *DatasourceRule) *DTO {
 	return &DTO{
 		ID:        r.ID,
 		Name:      r.Name,
-		DBType:    r.DBType,
+		TypeGroup: r.TypeGroup,
+		TypeScope: r.TypeScope,
 		Category:  r.Category,
 		Pattern:   r.Pattern,
 		Enabled:   r.Enabled,
+		Priority:  r.Priority,
 		CreatedAt: r.CreatedAt,
 		UpdatedAt: r.UpdatedAt,
 	}

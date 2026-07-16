@@ -2,26 +2,24 @@ package escalation
 
 import (
 	"time"
-
-	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
 )
 
 type DTO struct {
-	ID         uint       `json:"id"`
-	UserID     uint       `json:"user_id"`
-	ProjectID  uint       `json:"project_id"`
+	ID         string     `json:"id"`
+	UserID     string     `json:"user_id"`
+	ProjectID  string     `json:"project_id"`
 	Reason     string     `json:"reason"`
 	Status     string     `json:"status"`
 	ExpiresAt  time.Time  `json:"expires_at"`
-	ApprovedBy *uint      `json:"approved_by,omitempty"`
+	ApprovedBy *string    `json:"approved_by,omitempty"`
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
-	RejectedBy *uint      `json:"rejected_by,omitempty"`
+	RejectedBy *string    `json:"rejected_by,omitempty"`
 	RejectedAt *time.Time `json:"rejected_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
 type CreateRequest struct {
-	ProjectID uint   `json:"project_id"`
+	ProjectID string `json:"project_id"`
 	Reason    string `json:"reason"`
 }
 
@@ -30,11 +28,12 @@ type ApproveRequest struct {
 	Duration string `json:"duration,omitempty"` // optional: "24h", "7d", "30d", "1y"; default 1y
 }
 
-type ListQuery struct {
-	response.PageQuery
-	Scope     string `query:"scope"` // my | pending | all
-	ProjectID uint   `query:"project_id"`
-	Status    string `query:"status"`
+type UpdateRequest struct {
+	Reason string `json:"reason"`
+}
+
+type BatchDeleteRequest struct {
+	IDs []string `json:"ids"`
 }
 
 type ActiveResponse struct {

@@ -4,16 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"czwlinux.cloud/go-friday-starter/features/auth"
 	"czwlinux.cloud/go-friday-starter/features/project"
-	"czwlinux.cloud/go-friday-starter/features/user"
 	"czwlinux.cloud/go-friday-starter/features/webhook"
+	"czwlinux.cloud/go-friday-starter/global"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
 )
 
 // CreateEscalation creates a new escalation request.
-func CreateEscalation(ctx context.Context, userID, projectID uint, reason string) (*DTO, error) {
-	if projectID == 0 || reason == "" {
+func CreateEscalation(ctx context.Context, userID, projectID string, reason string) (*DTO, error) {
+	if projectID == "" || reason == "" {
 		return nil, fmt.Errorf("invalid param")
 	}
 
@@ -38,8 +41,8 @@ func CreateEscalation(ctx context.Context, userID, projectID uint, reason string
 }
 
 // ApproveEscalation approves a pending escalation. Sets expiry to max 1 year from now.
-// project_owner can self-approve.
-func ApproveEscalation(ctx context.Context, escalationID, approverID uint, duration string) (*DTO, error) {
+// Project admin can self-approve.
+func ApproveEscalation(ctx context.Context, escalationID, approverID string, duration string) (*DTO, error) {
 	e, err := GetByID(ctx, escalationID)
 	if err != nil {
 		return nil, err
@@ -48,19 +51,19 @@ func ApproveEscalation(ctx context.Context, escalationID, approverID uint, durat
 		return nil, fmt.Errorf("escalation already %s", e.Status)
 	}
 
-	// Check approver permissions: must be project_owner, system_admin, or the applicant themselves (self-approval)
+	// Check approver permissions: must be project admin/approver, system_admin (*), or the applicant themselves (self-approval)
 	userRole := project.GetUserProjectRole(ctx, e.ProjectID, approverID)
-	isProjectOwner := userRole == project.MemberRoleProjectOwner
-	isSystemAdmin := false
+	isAdmin := userRole == project.MemberRoleAdmin || userRole == project.MemberRoleApprover
 	isApplicant := approverID == e.UserID
 
-	u, err := user.GetByID(ctx, approverID)
-	if err == nil {
-		isSystemAdmin = u.IsSystemAdmin()
+	isSysAdmin := false
+	codes, codeErr := auth.GetUserPermissionCodes(ctx, approverID)
+	if codeErr == nil {
+		isSysAdmin = auth.HasPermission(codes, "*")
 	}
 
-	if !isProjectOwner && !isSystemAdmin && !isApplicant {
-		return nil, fmt.Errorf("forbidden: only project owner or system admin can approve escalations, or self-approval")
+	if !isAdmin && !isSysAdmin && !isApplicant {
+		return nil, fmt.Errorf("forbidden: only project admin/approver or system admin can approve escalations, or self-approval")
 	}
 
 	// Calculate expiry
@@ -92,7 +95,7 @@ func ApproveEscalation(ctx context.Context, escalationID, approverID uint, durat
 }
 
 // RejectEscalation rejects a pending escalation.
-func RejectEscalation(ctx context.Context, escalationID, approverID uint) (*DTO, error) {
+func RejectEscalation(ctx context.Context, escalationID, approverID string) (*DTO, error) {
 	e, err := GetByID(ctx, escalationID)
 	if err != nil {
 		return nil, err
@@ -103,17 +106,17 @@ func RejectEscalation(ctx context.Context, escalationID, approverID uint) (*DTO,
 
 	// Check approver permissions
 	userRole := project.GetUserProjectRole(ctx, e.ProjectID, approverID)
-	isProjectOwner := userRole == project.MemberRoleProjectOwner
-	isSystemAdmin := false
+	isAdmin := userRole == project.MemberRoleAdmin || userRole == project.MemberRoleApprover
 	isApplicant := approverID == e.UserID
 
-	u, err := user.GetByID(ctx, approverID)
-	if err == nil {
-		isSystemAdmin = u.IsSystemAdmin()
+	isSysAdmin := false
+	codes, codeErr := auth.GetUserPermissionCodes(ctx, approverID)
+	if codeErr == nil {
+		isSysAdmin = auth.HasPermission(codes, "*")
 	}
 
-	if !isProjectOwner && !isSystemAdmin && !isApplicant {
-		return nil, fmt.Errorf("forbidden: only project owner or system admin can reject escalations, or self-rejection")
+	if !isAdmin && !isSysAdmin && !isApplicant {
+		return nil, fmt.Errorf("forbidden: only project admin/approver or system admin can reject escalations, or self-rejection")
 	}
 
 	e.Status = StatusRejected
@@ -134,7 +137,7 @@ func RejectEscalation(ctx context.Context, escalationID, approverID uint) (*DTO,
 }
 
 // CheckActiveEscalation returns true if the user has an active (approved + not expired) escalation for the project.
-func CheckActiveEscalation(ctx context.Context, userID, projectID uint) (*ActiveResponse, error) {
+func CheckActiveEscalation(ctx context.Context, userID, projectID string) (*ActiveResponse, error) {
 	e, err := GetActiveByUserAndProject(ctx, userID, projectID)
 	if errors.Is(err, ErrNoActiveEscalation) {
 		return &ActiveResponse{Active: false}, nil
@@ -150,8 +153,8 @@ func CheckActiveEscalation(ctx context.Context, userID, projectID uint) (*Active
 }
 
 // ListEscalations lists escalations based on query.
-func ListEscalations(ctx context.Context, userID uint, q ListQuery) ([]*DTO, int64, error) {
-	items, total, err := ListByScope(ctx, userID, q)
+func ListEscalations(ctx context.Context, userID string, pq response.PageQuery, filters map[string]string) ([]*DTO, int64, error) {
+	items, total, err := ListByScope(ctx, userID, pq, filters)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -160,4 +163,84 @@ func ListEscalations(ctx context.Context, userID uint, q ListQuery) ([]*DTO, int
 		result = append(result, ToDTO(&items[i]))
 	}
 	return result, total, nil
+}
+
+// UpdateEscalation updates the reason for a pending escalation. Only the applicant can edit.
+func UpdateEscalation(ctx context.Context, id, userID string, req UpdateRequest) (*DTO, error) {
+	if id == "" {
+		return nil, ErrInvalidInput
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		return nil, ErrInvalidInput
+	}
+
+	e, err := GetByID(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	if err != nil {
+		return nil, err
+	}
+	if e.UserID != userID {
+		return nil, ErrForbidden
+	}
+	if e.Status != StatusPending {
+		return nil, fmt.Errorf("can only edit pending escalation")
+	}
+
+	e.Reason = reason
+	if err := Save(ctx, e); err != nil {
+		return nil, err
+	}
+	return ToDTO(e), nil
+}
+
+// DeleteEscalation soft-deletes a pending escalation. Only the applicant can delete.
+func DeleteEscalation(ctx context.Context, id, userID string) error {
+	if id == "" {
+		return ErrInvalidInput
+	}
+
+	e, err := GetByID(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if e.UserID != userID {
+		return ErrForbidden
+	}
+	if e.Status != StatusPending {
+		return fmt.Errorf("can only delete pending escalation")
+	}
+
+	return DeleteByID(ctx, id)
+}
+
+// BatchDeleteEscalations batch-deletes pending escalations for the current user.
+func BatchDeleteEscalations(ctx context.Context, userID string, ids []string) error {
+	cleanIDs := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		cleanIDs = append(cleanIDs, id)
+	}
+	if len(cleanIDs) == 0 {
+		return ErrInvalidInput
+	}
+
+	// Only delete pending escalations owned by the user
+	return global.DB.WithContext(ctx).
+		Where("id IN ?", cleanIDs).
+		Where("user_id = ?", userID).
+		Where("status = ?", StatusPending).
+		Delete(&Escalation{}).Error
 }

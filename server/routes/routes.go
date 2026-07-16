@@ -6,13 +6,17 @@ import (
 	"czwlinux.cloud/go-friday-starter/features/datasource"
 	"czwlinux.cloud/go-friday-starter/features/dsrule"
 	"czwlinux.cloud/go-friday-starter/features/escalation"
+	"czwlinux.cloud/go-friday-starter/features/exec"
+	"czwlinux.cloud/go-friday-starter/features/permission"
 	"czwlinux.cloud/go-friday-starter/features/poolstats"
 	"czwlinux.cloud/go-friday-starter/features/project"
-	"czwlinux.cloud/go-friday-starter/features/sqlfavorite"
-	"czwlinux.cloud/go-friday-starter/features/sqlexec"
+	"czwlinux.cloud/go-friday-starter/features/role"
+	rolepermission "czwlinux.cloud/go-friday-starter/features/role_permission"
+	"czwlinux.cloud/go-friday-starter/features/snippet"
 	"czwlinux.cloud/go-friday-starter/features/stats"
 	"czwlinux.cloud/go-friday-starter/features/ticket"
 	"czwlinux.cloud/go-friday-starter/features/user"
+	userrole "czwlinux.cloud/go-friday-starter/features/user_role"
 	"czwlinux.cloud/go-friday-starter/features/webhook"
 	"czwlinux.cloud/go-friday-starter/global"
 	"czwlinux.cloud/go-friday-starter/pkg/httpx"
@@ -22,10 +26,10 @@ import (
 func Register(e *echo.Echo) {
 	v1 := e.Group("/api/v1")
 
-	// 公开接口
+	// ====== 公开接口 ======
 	auth.RegisterRoutes(v1.Group("/auth"))
 
-	// 受保护接口
+	// ====== 受保护接口（需登录）=======
 	protected := v1.Group("")
 	protected.Use(httpx.JWTAuth(global.JWT))
 
@@ -33,57 +37,121 @@ func Register(e *echo.Echo) {
 	protected.GET("/auth/me", user.NewHandler().Me)
 	protected.PUT("/auth/profile", user.NewHandler().UpdateProfile)
 
-	// 用户管理 — 需要 system_admin 权限
-	users := protected.Group("/users")
-	users.Use(auth.RequireRole(user.RoleSystemAdmin))
-	user.RegisterRoutes(users)
+	// ====== 平台管理（platform:user:manage）=======
+	admin := protected.Group("", auth.RequirePermission("platform:user:manage"))
 
-	// 数据源管理 — 需要 system_admin 权限
-	datasources := protected.Group("/datasources")
-	datasources.Use(auth.RequireRole(user.RoleSystemAdmin))
-	datasource.RegisterRoutes(datasources)
+	// 用户管理
+	admin.GET("/users", user.NewHandler().List)
+	admin.POST("/users", user.NewHandler().Create)
+	admin.GET("/users/:id", user.NewHandler().Get)
+	admin.PUT("/users/:id", user.NewHandler().Update)
+	admin.DELETE("/users/:id", user.NewHandler().Delete)
+	admin.DELETE("/users/batch", user.NewHandler().BatchDelete)
 
-	// 项目（数据库分组）管理 — 需要 system_admin 权限
-	projects := protected.Group("/projects")
-	projects.Use(auth.RequireRole(user.RoleSystemAdmin))
-	project.RegisterRoutes(projects)
+	// 用户角色管理
+	admin.GET("/users/:userId/roles", userrole.NewHandler().ListUserRoles)
+	admin.POST("/users/:userId/roles", userrole.NewHandler().Assign)
+	admin.DELETE("/users/:userId/roles/:roleId", userrole.NewHandler().Unassign)
 
-	// 数据源规则管理 — 需要 system_admin 权限
-	dsRules := protected.Group("/datasource-rules")
-	dsRules.Use(auth.RequireRole(user.RoleSystemAdmin))
-	dsrule.RegisterRoutes(dsRules)
+	// 角色管理
+	admin.GET("/roles", role.NewHandler().List)
+	admin.GET("/roles/:id", role.NewHandler().Get)
+	admin.POST("/roles", role.NewHandler().Create)
+	admin.PUT("/roles/:id", role.NewHandler().Update)
+	admin.DELETE("/roles/:id", role.NewHandler().Delete)
 
-	// SQL 执行 + 元数据浏览 — 受保护，权限在 handler/service 内部检查（项目成员即可）
-	sqlexec.RegisterRoutes(protected)
+	// 权限码管理
+	admin.GET("/permissions", permission.NewHandler().List)
+	admin.GET("/permissions/:id", permission.NewHandler().Get)
+	admin.POST("/permissions", permission.NewHandler().Create)
+	admin.PUT("/permissions/:id", permission.NewHandler().Update)
+	admin.DELETE("/permissions/:id", permission.NewHandler().Delete)
+	admin.GET("/permissions/:id/bindings", permission.NewHandler().GetBindings)
 
-	// 审计日志 — 需要 system_admin 权限
-	audits := protected.Group("/audits")
-	audits.Use(auth.RequireRole(user.RoleSystemAdmin))
-	audit.RegisterRoutes(audits)
+	// 角色-权限码关联
+	admin.GET("/roles/:roleId/permissions", rolepermission.NewHandler().ListRolePermissions)
+	admin.POST("/roles/:roleId/permissions", rolepermission.NewHandler().Assign)
+	admin.DELETE("/roles/:roleId/permissions/:permId", rolepermission.NewHandler().Unassign)
 
-	// 工单（审批流）— 受保护，权限在 handler/service 内部检查
-	tickets := protected.Group("/tickets")
-	ticket.RegisterRoutes(tickets)
+	// ====== 数据源管理 ======
+	ds := protected.Group("/datasources")
+	ds.Use(auth.RequirePermission("db:datasource:view"))
+	ds.GET("", datasource.NewHandler().List)
+	ds.GET("/:id", datasource.NewHandler().Get)
 
-	// 提权管理 — 受保护，权限在 handler/service 内部检查
-	escalations := protected.Group("/escalations")
-	escalation.RegisterRoutes(escalations)
+	dsCreate := protected.Group("/datasources", auth.RequirePermission("db:datasource:create"))
+	dsCreate.POST("", datasource.NewHandler().Create)
 
-	// Webhook 配置 — 需要 system_admin 权限
-	webhooks := protected.Group("/webhooks")
-	webhooks.Use(auth.RequireRole(user.RoleSystemAdmin))
-	webhook.RegisterRoutes(webhooks)
+	dsEdit := protected.Group("/datasources", auth.RequirePermission("db:datasource:edit"))
+	dsEdit.PUT("/:id", datasource.NewHandler().Update)
+	dsEdit.POST("/:id/test", datasource.NewHandler().Test)
 
-	// Dashboard 统计 — 需要登录
+	dsDelete := protected.Group("/datasources", auth.RequirePermission("db:datasource:delete"))
+	dsDelete.DELETE("/:id", datasource.NewHandler().Delete)
+	dsDelete.POST("/batch-delete", datasource.NewHandler().BatchDelete)
+
+	protected.GET("/datasource-types", datasource.NewHandler().ListTypes)
+
+	// ====== 项目管理 ======
+	proj := protected.Group("/projects")
+	proj.Use(auth.RequirePermission("db:project:view"))
+	proj.GET("", project.NewHandler().List)
+	proj.GET("/:id", project.NewHandler().Get)
+	proj.GET("/:id/members", project.NewHandler().ListMembers)
+
+	projCreate := protected.Group("/projects", auth.RequirePermission("db:project:create"))
+	projCreate.POST("", project.NewHandler().Create)
+
+	projEdit := protected.Group("/projects", auth.RequirePermission("db:project:edit"))
+	projEdit.PUT("/:id", project.NewHandler().Update)
+	projEdit.PUT("/:id/members", project.NewHandler().UpdateMembers)
+
+	projDelete := protected.Group("/projects", auth.RequirePermission("db:project:delete"))
+	projDelete.DELETE("/:id", project.NewHandler().Delete)
+	projDelete.POST("/batch-delete", project.NewHandler().BatchDelete)
+
+	// ====== SQL 规则管理 ======
+	rule := protected.Group("/datasource-rules")
+	rule.Use(auth.RequirePermission("db:rule:view"))
+	rule.GET("", dsrule.NewHandler().List)
+
+	ruleWrite := protected.Group("/datasource-rules", auth.RequirePermission("db:rule:create"))
+	ruleWrite.POST("", dsrule.NewHandler().Create)
+
+	ruleEdit := protected.Group("/datasource-rules", auth.RequirePermission("db:rule:edit"))
+	ruleEdit.PUT("/:id", dsrule.NewHandler().Update)
+
+	ruleDelete := protected.Group("/datasource-rules", auth.RequirePermission("db:rule:manage"))
+	ruleDelete.DELETE("/:id", dsrule.NewHandler().Delete)
+	ruleDelete.POST("/batch-delete", dsrule.NewHandler().BatchDelete)
+
+	// ====== SQL 执行（业务特判，无权限码中间件）=======
+	exec.RegisterRoutes(protected)
+
+	// ====== 审计日志 ======
+	protected.GET("/audits", audit.NewHandler().List, auth.RequirePermission("db:audit:view"))
+
+	// ====== 工单（业务特判）=======
+	ticket.RegisterRoutes(protected.Group("/tickets"))
+
+	// ====== 提权（业务特判）=======
+	escalation.RegisterRoutes(protected.Group("/escalations"))
+
+	// ====== Webhook 管理 ======
+	webhookGroup := protected.Group("/webhooks")
+	webhookGroup.Use(auth.RequirePermission("db:webhook:manage"))
+	webhook.RegisterRoutes(webhookGroup)
+
+	// ====== Dashboard 统计（仅登录）=======
 	stats.RegisterRoutes(protected)
 
-	// 连接池监控 — 需要登录
+	// ====== 连接池监控（仅登录）=======
 	poolstats.RegisterRoutes(protected)
 
-	// SQL 收藏 — 需要登录
-	sqlfavorite.RegisterRoutes(protected)
+	// ====== 代码片段收藏（仅登录）=======
+	snippet.RegisterRoutes(protected)
 
-	// 健康检查
+	// ====== 健康检查 ======
 	v1.GET("/health", func(c echo.Context) error {
 		return c.String(200, "ok")
 	})

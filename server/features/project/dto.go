@@ -1,56 +1,47 @@
 package project
 
 import (
+	"strings"
 	"time"
-
-	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
 )
 
 type DTO struct {
-	ID                uint      `json:"id"`
-	Name              string    `json:"name"`
-	DatasourceID      uint      `json:"datasource_id"`
-	Databases         []string  `json:"databases"`
-	ApprovalMode      string    `json:"approval_mode"`
-	ApproverIDs       []uint    `json:"approver_ids"`
-	AutoMatchApprover bool      `json:"auto_match_approver"`
-	WebhookIDs        []uint    `json:"webhook_ids"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	Name         string    `json:"name"`
+	DatasourceID string    `json:"datasource_id"`
+	Scope        []string  `json:"scope"`
+	ApprovalMode string    `json:"approval_mode"`
+	WebhookIDs   []string  `json:"webhook_ids"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type MemberDTO struct {
-	ID        uint      `json:"id"`
-	ProjectID uint      `json:"project_id"`
-	UserID    uint      `json:"user_id"`
+	ID        string    `json:"id"`
+	ProjectID string    `json:"project_id"`
+	UserID    string    `json:"user_id"`
 	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"created_at"`
-}
-
-type ListQuery struct {
-	response.PageQuery
-	Keyword        string `query:"keyword" json:"keyword"`
-	DatasourceID   uint   `query:"datasource_id" json:"datasource_id"`
-	ProjectOwnerID uint   `query:"project_owner_id" json:"project_owner_id"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type CreateRequest struct {
-	Name           string   `json:"name"`
-	DatasourceID   uint     `json:"datasource_id"`
-	Databases      []string `json:"databases"`
-	ApprovalMode   string   `json:"approval_mode"`
-	ApproverIDs    []uint   `json:"approver_ids"`
-	AutoMatchApprover bool `json:"auto_match_approver"`
-	WebhookIDs     []uint   `json:"webhook_ids"`
+	Name         string   `json:"name"`
+	DatasourceID string   `json:"datasource_id"`
+	Scope        []string `json:"scope"`
+	ApprovalMode string   `json:"approval_mode"`
+	WebhookIDs   []string `json:"webhook_ids"`
 }
 
 type UpdateRequest struct {
-	Name           string   `json:"name"`
-	Databases      []string `json:"databases"`
-	ApprovalMode   string   `json:"approval_mode"`
-	ApproverIDs    []uint   `json:"approver_ids"`
-	AutoMatchApprover bool `json:"auto_match_approver"`
-	WebhookIDs     []uint   `json:"webhook_ids"`
+	Name         string   `json:"name"`
+	Scope        []string `json:"scope"`
+	ApprovalMode string   `json:"approval_mode"`
+	WebhookIDs   []string `json:"webhook_ids"`
+}
+
+type BatchDeleteRequest struct {
+	IDs []string `json:"ids"`
 }
 
 type UpdateMembersRequest struct {
@@ -58,81 +49,8 @@ type UpdateMembersRequest struct {
 }
 
 type MemberInput struct {
-	UserID uint   `json:"user_id"`
+	UserID string `json:"user_id"`
 	Role   string `json:"role"`
-}
-
-func parseIDs(s string) []uint {
-	if s == "" {
-		return nil
-	}
-	// 将在 service 中使用真正的解析
-	return nil
-}
-
-func joinIDs(ids []uint) string {
-	if len(ids) == 0 {
-		return ""
-	}
-	b := make([]byte, 0, len(ids)*6)
-	for i, id := range ids {
-		if i > 0 {
-			b = append(b, ',')
-		}
-		b = append(b, []byte(formatUint(id))...)
-	}
-	return string(b)
-}
-
-func JoinIDs(ids []uint) string {
-	if len(ids) == 0 {
-		return ""
-	}
-	b := make([]byte, 0, len(ids)*6)
-	for i, id := range ids {
-		if i > 0 {
-			b = append(b, ',')
-		}
-		b = append(b, []byte(formatUint(id))...)
-	}
-	return string(b)
-}
-
-func splitIDs(s string) []uint {
-	if s == "" {
-		return nil
-	}
-	// simple split
-	var ids []uint
-	var current uint
-	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			current = current*10 + uint(c-'0')
-		} else if c == ',' {
-			if current > 0 {
-				ids = append(ids, current)
-				current = 0
-			}
-		}
-	}
-	if current > 0 {
-		ids = append(ids, current)
-	}
-	return ids
-}
-
-func formatUint(n uint) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
 }
 
 func joinStrings(strs []string) string {
@@ -153,7 +71,6 @@ func splitStrings(s string) []string {
 	if s == "" {
 		return nil
 	}
-	// Split by both English comma and Chinese comma
 	var result []string
 	var start int
 	for i, c := range s {
@@ -170,25 +87,27 @@ func splitStrings(s string) []string {
 	return result
 }
 
-func ToDTO(p *DbProject) *DTO {
+func ToDTO(p *DataProject) *DTO {
 	if p == nil {
 		return nil
 	}
+	var scope []string
+	if p.Scope != "" {
+		scope = splitStrings(p.Scope)
+	}
 	return &DTO{
-		ID:                p.ID,
-		Name:              p.Name,
-		DatasourceID:      p.DatasourceID,
-		Databases:         splitStrings(p.Databases),
-		ApprovalMode:      p.ApprovalMode,
-		ApproverIDs:       splitIDs(p.ApproverIDs),
-		AutoMatchApprover: p.AutoMatchApprover,
-		WebhookIDs:        splitIDs(p.WebhookIDs),
-		CreatedAt:         p.CreatedAt,
-		UpdatedAt:         p.UpdatedAt,
+		ID:           p.ID,
+		Name:         p.Name,
+		DatasourceID: p.DatasourceID,
+		Scope:        scope,
+		ApprovalMode: p.ApprovalMode,
+		WebhookIDs:   splitIDs(p.WebhookIDs),
+		CreatedAt:    p.CreatedAt,
+		UpdatedAt:    p.UpdatedAt,
 	}
 }
 
-func ToMemberDTO(m *ProjectMember) *MemberDTO {
+func ToMemberDTO(m *DataProjectMember) *MemberDTO {
 	if m == nil {
 		return nil
 	}
@@ -198,5 +117,34 @@ func ToMemberDTO(m *ProjectMember) *MemberDTO {
 		UserID:    m.UserID,
 		Role:      m.Role,
 		CreatedAt: m.CreatedAt,
+		UpdatedAt: m.UpdatedAt,
 	}
+}
+
+func joinIDs(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	b := make([]byte, 0, len(ids)*33)
+	for i, id := range ids {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		b = append(b, []byte(id)...)
+	}
+	return string(b)
+}
+
+func splitIDs(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var ids []string
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			ids = append(ids, part)
+		}
+	}
+	return ids
 }

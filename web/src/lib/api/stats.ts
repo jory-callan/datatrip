@@ -8,8 +8,8 @@ export interface DashboardStats {
   today_exec_count: number
   pending_ticket_count: number
   recent_executions: {
-    id: number
-    project_id: number
+    id: string
+    project_id: string
     project_name: string
     sql: string
     classification: string

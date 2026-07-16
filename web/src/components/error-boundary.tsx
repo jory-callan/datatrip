@@ -34,7 +34,7 @@ export class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) return this.props.fallback
       return <ErrorFallback error={this.state.error} onReset={this.reset} />
     }
-    return <div className={cn('flex min-h-0 flex-1 flex-col overflow-auto', this.props.className)}>{this.props.children}</div>
+    return <div className={cn('flex min-h-0 flex-1 flex-col', this.props.className)}>{this.props.children}</div>
   }
 }
 

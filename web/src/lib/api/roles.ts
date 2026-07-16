@@ -1,62 +1,30 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { apiClient } from '../api-client'
 
 export interface Role {
-  id: number
-  role_code: string
+  id: string
+  
+  code: string
   name: string
+  description?: string
+  is_system: boolean
   created_at: string
   updated_at: string
 }
 
-export interface RoleListParams {
-  page: number
-  pageSize: number
-  needCount?: boolean
-  keyword?: string
-}
-
-export interface RoleListResponse {
-  list: Role[]
-  total: number
-  page: number
-  page_size: number
-}
-
-export interface CreateRoleInput {
-  role_code: string
-  name: string
-}
-
-export interface UpdateRoleInput {
-  id: number
-  role_code: string
-  name: string
-}
-
-export const useRoles = ({ page, pageSize, needCount = true, keyword }: RoleListParams) => {
+export const useRoles = () => {
   return useQuery({
-    queryKey: ['roles', page, pageSize, needCount, keyword ?? ''],
-    queryFn: () => apiClient<RoleListResponse>('/roles', {
-      query: {
-        page,
-        page_size: pageSize,
-        need_count: String(needCount),
-        ...(keyword ? { keyword } : {}),
-      },
-    }),
-    placeholderData: keepPreviousData,
+    queryKey: ['roles'],
+    queryFn: () => apiClient<Role[]>('/roles'),
   })
 }
 
 export const useCreateRole = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: CreateRoleInput) => apiClient<Role>('/roles', {
-      method: 'POST',
-      body: data,
-    }),
+    mutationFn: (data: { code: string; name: string; description?: string }) =>
+      apiClient<Role>('/roles', { method: 'POST', body: data }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['roles'] }),
   })
 }
@@ -64,10 +32,8 @@ export const useCreateRole = () => {
 export const useUpdateRole = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, ...data }: UpdateRoleInput) => apiClient<Role>(`/roles/${id}`, {
-      method: 'PUT',
-      body: data,
-    }),
+    mutationFn: ({ id, ...data }: { id: string; name?: string; description?: string }) =>
+      apiClient<Role>(`/roles/${id}`, { method: 'PUT', body: data }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['roles'] }),
   })
 }
@@ -75,18 +41,7 @@ export const useUpdateRole = () => {
 export const useDeleteRole = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: number) => apiClient<null>(`/roles/${id}`, { method: 'DELETE' }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['roles'] }),
-  })
-}
-
-export const useBatchDeleteRoles = () => {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (ids: number[]) => apiClient<null>('/roles/batch', {
-      method: 'DELETE',
-      body: { ids },
-    }),
+    mutationFn: (id: string) => apiClient<null>(`/roles/${id}`, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['roles'] }),
   })
 }

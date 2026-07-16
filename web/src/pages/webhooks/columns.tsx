@@ -1,10 +1,50 @@
+import { useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
-import { IconPencil } from '@tabler/icons-react'
+import { IconDotsVertical, IconEdit } from '@tabler/icons-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { formatDateTime } from '@/lib/utils'
 import type { Webhook } from '@/lib/api/webhooks'
+
+function ActionDropdown({
+  row,
+  openEdit,
+  isUpdating,
+}: {
+  row: Webhook
+  openEdit: (wh: Webhook) => void
+  isUpdating: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const itemClass =
+    'focus:bg-accent focus:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none w-full [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4'
+
+  return (
+    <HoverCard open={open} onOpenChange={setOpen} openDelay={0} closeDelay={100}>
+      <HoverCardTrigger asChild>
+        <Button
+          variant="ghost" size="sm"
+          className="h-8 w-8 p-0"
+          onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
+        >
+          <IconDotsVertical className="size-4" />
+        </Button>
+      </HoverCardTrigger>
+      <HoverCardContent align="end" sideOffset={4} className="w-32 p-1">
+        <button
+          type="button"
+          disabled={isUpdating}
+          className={itemClass}
+          onClick={() => { setOpen(false); openEdit(row) }}
+        >
+          <IconEdit className="size-4" /> 编辑
+        </button>
+      </HoverCardContent>
+    </HoverCard>
+  )
+}
 
 export function useWebhookColumns(
   openEdit: (wh: Webhook) => void,
@@ -24,7 +64,7 @@ export function useWebhookColumns(
     {
       accessorKey: 'scope',
       header: '范围',
-      cell: ({ row }) => <Badge variant="outline">{row.original.scope}</Badge>,
+      cell: ({ row }) => <Badge variant="outline">{(row.original as any).scope}</Badge>,
       meta: { label: '范围' },
     },
     {
@@ -55,11 +95,14 @@ export function useWebhookColumns(
     {
       accessorKey: 'enabled',
       header: '启用',
-      cell: ({ row }) => (
-        <Badge variant={row.original.enabled ? 'default' : 'secondary'}>
-          {row.original.enabled ? '启用' : '禁用'}
-        </Badge>
-      ),
+      cell: ({ row }) => {
+        const enabled = (row.original as any).enabled
+        return (
+          <Badge variant={enabled ? 'default' : 'secondary'}>
+            {enabled ? '启用' : '禁用'}
+          </Badge>
+        )
+      },
       meta: { label: '启用' },
     },
     {
@@ -72,19 +115,11 @@ export function useWebhookColumns(
       id: 'actions',
       enableHiding: false,
       header: '操作',
+      size: 64,
       cell: ({ row }) => (
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost" size="sm"
-            disabled={isUpdating}
-            onClick={() => openEdit(row.original)}
-          >
-            <IconPencil className="size-4" />
-            {'编辑'}
-          </Button>
-        </div>
+        <ActionDropdown row={row.original} openEdit={openEdit} isUpdating={isUpdating} />
       ),
-      meta: { label: '操作' },
+      meta: { label: '操作', pinned: 'right' as const },
     },
   ]
 }

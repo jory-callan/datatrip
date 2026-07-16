@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '../api-client'
 
 export interface PoolStats {
-  datasource_id: number
+  datasource_id: string
   active: number
   idle: number
   wait_count: number
@@ -12,7 +12,7 @@ export interface PoolStats {
   is_connected: boolean
 }
 
-export const usePoolStats = (datasourceId: number) => {
+export const usePoolStats = (datasourceId: string) => {
   return useQuery({
     queryKey: ['pool-stats', datasourceId],
     queryFn: () => apiClient<PoolStats>(`/pool-stats/${datasourceId}`),

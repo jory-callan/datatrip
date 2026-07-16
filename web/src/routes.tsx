@@ -6,8 +6,9 @@ import { GuestGuard } from './components/guest-guard'
 import { appConfig } from './config/app-config'
 import { LoginPage } from './pages/login'
 import { Overview } from './pages/overview'
-import { PermissionConfigPage } from './pages/permissions'
+import { PermissionCodesPage } from './pages/permissions'
 import { ProfilePage } from './pages/profile'
+import { RolesPage } from './pages/roles'
 import { UsersPage } from './pages/users'
 import { DatasourcesPage } from './pages/datasources'
 import { ProjectsPage } from './pages/projects'
@@ -65,7 +66,11 @@ export const router = createBrowserRouter([
       },
       {
         path: 'permissions',
-        element: <PermissionConfigPage />,
+        element: <PermissionCodesPage />,
+      },
+      {
+        path: 'roles',
+        element: <RolesPage />,
       },
       {
         path: 'sql-workbench',

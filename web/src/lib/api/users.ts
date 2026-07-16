@@ -24,17 +24,18 @@ export interface CreateUserInput {
   username: string
   password: string
   nickname?: string
+  email?: string
+  phone?: string
   status?: string
-  role_code?: string
 }
 
 export interface UpdateUserInput {
-  id: number
-  username: string
+  id: string
   password?: string
   nickname?: string
+  email?: string
+  phone?: string
   status?: string
-  role_code?: string
 }
 
 export const useUsers = ({ page, pageSize, needCount = true, keyword, status }: UserListParams) => {
@@ -78,7 +79,7 @@ export const useUpdateUser = () => {
 export const useDeleteUser = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: number) => apiClient<null>(`/users/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => apiClient<null>(`/users/${id}`, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
   })
 }
@@ -86,7 +87,7 @@ export const useDeleteUser = () => {
 export const useBatchDeleteUsers = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (ids: number[]) => apiClient<null>('/users/batch', {
+    mutationFn: (ids: string[]) => apiClient<null>('/users/batch', {
       method: 'DELETE',
       body: { ids },
     }),

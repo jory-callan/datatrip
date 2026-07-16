@@ -28,6 +28,8 @@
 | JSON 字段 | 默认 snake_case |
 | 密码字段 | 必须 `json:"-"` |
 | 权限判断 | 统一 `features/auth/authorization.go`，不散落 |
+| 权限匹配 | 前缀 `*` 通配（详见 `docs/permission.md`）|
+| UUID 生成 | `pkg/uuid.NewV7()`，返回 32 位无短横线 |
 | 密码读写 | 统一 `pkg/password` 入口 |
 | 业务代码 | `features/` 下按模块分包 |
 | 可复用能力 | `pkg/` 下，不放业务模块 |
@@ -66,17 +68,19 @@ server/
 ├── pkg/
 │   ├── authctx/     # 鉴权上下文
 │   ├── cache/       # 缓存（内存/Redis）
-│   ├── dbpool/      # 连接池管理（懒加载）
-│   ├── sqlclassifier/ # SQL 分类器
+│   ├── dbpool/      # 连接池管理（懒加载，SQL/Redis/Mongo/ES）
+│   ├── driver/      # 数据源连接器（SQLConnector + 辅助函数）
+│   ├── 
 │   ├── jwt/         # JWT
 │   ├── password/    # 密码统一加解密入口
+│   ├── queryfilter/ # 通用动态筛选器（ParseListQuery + ApplyAll + Paginate）
 │   └── ...
 ├── features/
 │   ├── auth/        # 认证与授权
 │   ├── user/        # 用户管理
 │   ├── datasource/  # 数据源管理
 │   ├── project/     # 数据项目管理
-│   ├── sqlexec/     # SQL 执行
+│   ├── exec/     # 执行（SQL/NoSQL/Search 三路分发）
 │   ├── ticket/      # 工单审批流
 │   ├── escalation/  # 提权
 │   ├── webhook/     # Webhook 通知
@@ -117,6 +121,69 @@ main.go → cmd.Execute → global.MustInit → global.Engine.Start
 - JSON 字段默认 snake_case
 - 密码字段必须 `json:"-"`
 - 权限判断统一走 `features/auth/authorization.go`，不散落到 handler/service
+
+### 分页列表 Handler 通用化
+
+所有列表 handler 统一使用 `response.ParseListQuery(c)` 替代手写分页样板代码：
+
+```go
+func (h *Handler) List(c echo.Context) error {
+    pq, filters, err := response.ParseListQuery(c)
+    if err != nil {
+        return response.BadRequest(c, "invalid param")
+    }
+    items, total, err := ListXxx(c.Request().Context(), pq, filters)
+    if err != nil {
+        return response.InternalError(c, "internal error")
+    }
+    return response.SuccessPage(c, items, total, pq.Page, pq.PageSize)
+}
+```
+
+### Repo 层通用筛选
+
+repo 层列表函数接收 `pq response.PageQuery` + `filters map[string]string`，使用 `queryfilter` 包处理筛选和分页：
+
+```go
+import "czwlinux.cloud/go-friday-starter/pkg/queryfilter"
+
+func List(ctx context.Context, pq response.PageQuery, filters map[string]string) ([]Model, int64, error) {
+    var items []Model
+    db := global.DB.WithContext(ctx).Model(&Model{})
+
+    // 特殊逻辑（keyword 多列搜索、scope 等）在此处理
+
+    // 通用 filter 自动注入（columnMap 限制可用列，防注入）
+    db = queryfilter.ApplyAll(db, filters, map[string]string{
+        "status":     "status",
+        "project_id": "project_id",
+    })
+
+    // 通用分页
+    total, err := queryfilter.Paginate(db.Order("id desc"), pq.Page, pq.PageSize, pq.NeedCount, &items)
+    return items, total, err
+}
+```
+
+筛选值遵循 docs/api/README.md 中定义的操作符前缀协议，`queryfilter.Parse` 自动解析：
+- `=value` / 无前缀 → 精确匹配
+- `=～*val*` → LIKE
+- `=[a,b]` → IN
+- `=gte:val` / `=lte:val` / `=gt:val` / `=lt:val` → 比较
+- `=between:a,b` → BETWEEN
+
+## 数据库设计规则
+
+| 规则 | 说明 |
+|---|---|
+| 每表必有字段 | `id`(varchar 32 PK, UUID v7 无短横线) + `created_at` + `updated_at` + `deleted_at` |
+| 外键引用 | `{prefix}_id` 形式（如 `role_id`、`user_id`）|
+| 禁止 | BaseModel、外键约束、自增依赖 |
+| 模型 | 表结构和 Go model 一一对应 |
+| 关联维护 | 代码内维护引用关系，不依赖 GORM 关联特性 |
+| UUID 生成 | 统一使用 `pkg/uuid.NewV7()` |
+| 表名前缀 | `data_`（业务表）或 `sys_`（系统表），通过 `TableName()` 显式指定。参见根 CONVENTIONS.md「数据库设计规则」|
+| ID 规则 | PK 直接使用 UUID v7（无短横线 32 位），不设冗余 `uuid` 字段。`BeforeCreate` 钩子自动填充 |
 
 ## 配置和数据规则
 

@@ -130,3 +130,32 @@ func InternalError(c echo.Context, msg string) error {
 func SuccessPage(c echo.Context, list any, total int64, page, pageSize int) error {
 	return Ok(c, PageData{List: list, Total: total, Page: page, PageSize: pageSize})
 }
+
+// ParseListQuery 从请求中解析分页参数并收集其余筛选参数。
+// 返回：
+//   - pq: 已 Normalize 的 PageQuery
+//   - filters: 除 page/page_size/need_count 之外的所有 query 参数
+//   - error: binding 失败时返回
+//
+// HandleList 内部使用时不再需要手写 NeedCount 默认值和 Normalize。
+func ParseListQuery(c echo.Context) (pq PageQuery, filters map[string]string, err error) {
+	pq.NeedCount = true
+	if err := c.Bind(&pq); err != nil {
+		return pq, nil, err
+	}
+	if c.QueryParam("need_count") == "false" {
+		pq.NeedCount = false
+	}
+	pq.Normalize()
+
+	filters = make(map[string]string)
+	for k, vs := range c.QueryParams() {
+		if k == "page" || k == "page_size" || k == "need_count" {
+			continue
+		}
+		if len(vs) > 0 && vs[0] != "" {
+			filters[k] = vs[0]
+		}
+	}
+	return pq, filters, nil
+}

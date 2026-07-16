@@ -2,7 +2,6 @@ package ticket
 
 import (
 	"errors"
-	"strconv"
 
 	"czwlinux.cloud/go-friday-starter/features/project"
 	"czwlinux.cloud/go-friday-starter/pkg/httpx"
@@ -17,31 +16,26 @@ func NewHandler() *Handler {
 }
 
 func (h *Handler) List(c echo.Context) error {
-	var q ListQuery
-	q.NeedCount = true
-	if err := c.Bind(&q); err != nil {
+	pq, filters, err := response.ParseListQuery(c)
+	if err != nil {
 		return response.BadRequest(c, "invalid param")
 	}
-	if c.QueryParam("need_count") == "false" {
-		q.NeedCount = false
-	}
-	q.Normalize()
 
 	userID := httpx.CurrentUserID(c)
-	items, total, err := ListTicketsForUser(c.Request().Context(), userID, q)
+	items, total, err := ListTicketsForUser(c.Request().Context(), userID, pq, filters)
 	if err != nil {
 		return response.InternalError(c, "internal error")
 	}
-	return response.SuccessPage(c, items, total, q.Page, q.PageSize)
+	return response.SuccessPage(c, items, total, pq.Page, pq.PageSize)
 }
 
 func (h *Handler) Detail(c echo.Context) error {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil || id == 0 {
+	id := c.Param("id")
+	if id == "" {
 		return response.BadRequest(c, "invalid id")
 	}
 
-	detail, err := GetTicketDetail(c.Request().Context(), uint(id))
+	detail, err := GetTicketDetail(c.Request().Context(), id)
 	if errors.Is(err, ErrNotFound) {
 		return response.NotFound(c, "ticket not found")
 	}
@@ -52,8 +46,8 @@ func (h *Handler) Detail(c echo.Context) error {
 }
 
 func (h *Handler) Approve(c echo.Context) error {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil || id == 0 {
+	id := c.Param("id")
+	if id == "" {
 		return response.BadRequest(c, "invalid id")
 	}
 
@@ -63,7 +57,7 @@ func (h *Handler) Approve(c echo.Context) error {
 	}
 
 	userID := httpx.CurrentUserID(c)
-	t, err := ApproveTicket(c.Request().Context(), uint(id), userID, req.Comment)
+	t, err := ApproveTicket(c.Request().Context(), id, userID, req.Comment)
 	if errors.Is(err, ErrNotFound) {
 		return response.NotFound(c, "ticket not found")
 	}
@@ -83,8 +77,8 @@ func (h *Handler) Approve(c echo.Context) error {
 }
 
 func (h *Handler) Reject(c echo.Context) error {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil || id == 0 {
+	id := c.Param("id")
+	if id == "" {
 		return response.BadRequest(c, "invalid id")
 	}
 
@@ -94,7 +88,7 @@ func (h *Handler) Reject(c echo.Context) error {
 	}
 
 	userID := httpx.CurrentUserID(c)
-	t, err := RejectTicket(c.Request().Context(), uint(id), userID, req.Comment)
+	t, err := RejectTicket(c.Request().Context(), id, userID, req.Comment)
 	if errors.Is(err, ErrNotFound) {
 		return response.NotFound(c, "ticket not found")
 	}
@@ -129,7 +123,7 @@ func (h *Handler) Create(c echo.Context) error {
 		req.ApprovalMode = proj.ApprovalMode
 	}
 
-	t, err := CreateTicket(c.Request().Context(), req.ProjectID, userID, req.Title, req.Description, req.SqlSnapshot, req.ApprovalMode)
+	t, err := CreateTicket(c.Request().Context(), req.ProjectID, userID, req.Title, req.Description, req.InstructionJSON, req.ApprovalMode)
 	if errors.Is(err, ErrInvalidInput) {
 		return response.BadRequest(c, "invalid param")
 	}
@@ -140,12 +134,12 @@ func (h *Handler) Create(c echo.Context) error {
 }
 
 func (h *Handler) Urge(c echo.Context) error {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil || id == 0 {
+	id := c.Param("id")
+	if id == "" {
 		return response.BadRequest(c, "invalid id")
 	}
 	userID := httpx.CurrentUserID(c)
-	t, err := UrgeTicket(c.Request().Context(), uint(id), userID)
+	t, err := UrgeTicket(c.Request().Context(), id, userID)
 	if errors.Is(err, ErrNotFound) {
 		return response.NotFound(c, "ticket not found")
 	}
@@ -162,8 +156,8 @@ func (h *Handler) Urge(c echo.Context) error {
 }
 
 func (h *Handler) Resubmit(c echo.Context) error {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil || id == 0 {
+	id := c.Param("id")
+	if id == "" {
 		return response.BadRequest(c, "invalid id")
 	}
 	var req CreateTicketRequest
@@ -171,7 +165,7 @@ func (h *Handler) Resubmit(c echo.Context) error {
 		return response.BadRequest(c, "invalid param")
 	}
 	userID := httpx.CurrentUserID(c)
-	t, err := ResubmitTicket(c.Request().Context(), uint(id), userID, req.Title, req.Description, req.SqlSnapshot)
+	t, err := ResubmitTicket(c.Request().Context(), id, userID, req.Title, req.Description, req.InstructionJSON)
 	if errors.Is(err, ErrNotFound) {
 		return response.NotFound(c, "ticket not found")
 	}

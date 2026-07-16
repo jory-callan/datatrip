@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 
-import { ListTable } from '@visactor/vtable'
+import { ListTable, themes } from '@visactor/vtable'
 import { exportVTableToCsv, downloadCsv, exportVTableToExcel, downloadExcel } from '@visactor/vtable-export'
 
 import { Button } from '@/components/ui/button'
@@ -17,63 +17,6 @@ import type { ResultTab } from './types'
 
 interface Props {
   tab: ResultTab | null
-}
-
-// ─── Theme builders ───────────────────────────────────
-
-function buildTheme(isDark: boolean) {
-  const headerBg = isDark ? '#1e293b' : '#f8fafc'
-  const headerColor = isDark ? '#e2e8f0' : '#334155'
-  const bodyBg = isDark ? '#0f172a' : '#ffffff'
-  const bodyColor = isDark ? '#cbd5e1' : '#334155'
-  const borderColor = isDark ? '#334155' : '#e2e8f0'
-  const hoverBg = isDark ? '#1e293b' : '#f1f5f9'
-  const selectionBg = isDark ? 'rgba(96,165,250,0.15)' : 'rgba(59,130,246,0.10)'
-  const scrollbarColor = isDark ? '#475569' : '#cbd5e1'
-
-  return {
-    headerStyle: {
-      bgColor: headerBg,
-      color: headerColor,
-      borderColor,
-      textAlign: 'left' as const,
-      fontWeight: '600' as const,
-      fontSize: 13,
-      padding: [8, 12] as [number, number],
-    },
-    bodyStyle: {
-      bgColor: bodyBg,
-      color: bodyColor,
-      borderColor,
-      textAlign: 'left' as const,
-      fontSize: 13,
-      padding: [6, 12] as [number, number],
-    },
-    frameStyle: {
-      borderColor,
-      borderLineWidth: 1,
-    },
-    hoverStyle: {
-      cellBgColor: hoverBg,
-    },
-    selectionStyle: {
-      cellBgColor: selectionBg,
-      cellBorderColor: 'transparent',
-    },
-    rowSeriesNumberStyle: {
-      bgColor: headerBg,
-      color: isDark ? '#64748b' : '#94a3b8',
-      borderColor,
-      fontSize: 11,
-      textAlign: 'center' as const,
-      padding: [4, 4] as [number, number],
-    },
-    scrollStyle: {
-      scrollSliderColor: scrollbarColor,
-      width: 10,
-      height: 10,
-    },
-  }
 }
 
 // ─── Main Component ──────────────────────────────────
@@ -180,7 +123,7 @@ export function VirtualResultTable({ tab }: Props) {
 
     const vcolumns = cols.map((col) => ({
       field: col.name,
-      title: col.name,
+      title: col.database_type ? `${col.name}  (${col.database_type})` : col.name,
       width: 120,
       minWidth: 60,
       maxWidth: 600,
@@ -194,7 +137,7 @@ export function VirtualResultTable({ tab }: Props) {
       tableInstance.current = null
     }
 
-    const theme = buildTheme(isDark)
+    const theme = isDark ? themes.DARK : themes.BRIGHT
     container.innerHTML = ''
 
     const table = new ListTable(container, {
@@ -313,7 +256,7 @@ export function VirtualResultTable({ tab }: Props) {
   // Error state
   if (tab?.error) {
     return (
-      <div className="flex items-start justify-center h-full p-6 text-sm">
+      <div className="flex items-start justify-start h-full p-6 text-sm">
         <div className="max-w-xl">
           <p className="font-medium text-red-600 dark:text-red-400 mb-1">{'执行出错'}</p>
           <pre className="whitespace-pre-wrap font-mono text-xs text-red-500/80 dark:text-red-400/80 bg-red-50 dark:bg-red-950/30 rounded p-3 border border-red-200 dark:border-red-900">

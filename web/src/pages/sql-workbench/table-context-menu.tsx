@@ -10,8 +10,8 @@ export function TableContextMenu({
   onClose,
 }: {
   state: TableContextMenuState
-  onCopySelect: (tableName: string, projectId: number, database: string) => void
-  onPreviewTable: (tableName: string, projectId: number, database: string) => void
+  onCopySelect: (tableName: string, projectId: string, database: string) => void
+  onPreviewTable: (tableName: string, projectId: string, database: string) => void
   onClose: () => void
 }) {
 

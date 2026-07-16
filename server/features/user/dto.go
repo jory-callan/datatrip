@@ -2,53 +2,49 @@ package user
 
 import (
 	"time"
-
-	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
 )
 
 type DTO struct {
-	ID        uint      `json:"id"`
+	ID        string    `json:"id"`
 	Username  string    `json:"username"`
 	Nickname  string    `json:"nickname"`
-	RoleCode  string    `json:"role_code"`
+	Email     string    `json:"email"`
+	Phone     string    `json:"phone"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-}
-
-type ListQuery struct {
-	response.PageQuery
-	Keyword  string `query:"keyword" json:"keyword"`
-	Status   string `query:"status" json:"status"`
-	RoleCode string `query:"role_code" json:"role_code"`
 }
 
 type CreateRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Nickname string `json:"nickname"`
-	RoleCode string `json:"role_code"`
+	Email    string `json:"email"`
+	Phone    string `json:"phone"`
 	Status   string `json:"status"`
 }
 
 type UpdateRequest struct {
 	Nickname string `json:"nickname"`
-	RoleCode string `json:"role_code"`
+	Email    string `json:"email"`
+	Phone    string `json:"phone"`
 	Status   string `json:"status"`
 	Password string `json:"password,omitempty"`
 }
 
 type UpdateProfileRequest struct {
 	Nickname string `json:"nickname"`
+	Email    string `json:"email"`
+	Phone    string `json:"phone"`
 	Password string `json:"password,omitempty"`
 }
 
 type BatchDeleteRequest struct {
-	IDs []uint `json:"ids"`
+	IDs []string `json:"ids"`
 }
 
 type BatchExportRequest struct {
-	IDs []uint `json:"ids"`
+	IDs []string `json:"ids"`
 }
 
 func ToDTO(u *User) *DTO {
@@ -59,7 +55,8 @@ func ToDTO(u *User) *DTO {
 		ID:        u.ID,
 		Username:  u.Username,
 		Nickname:  u.Nickname,
-		RoleCode:  u.RoleCode,
+		Email:     u.Email,
+		Phone:     u.Phone,
 		Status:    u.Status,
 		CreatedAt: u.CreatedAt,
 		UpdatedAt: u.UpdatedAt,

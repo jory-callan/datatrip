@@ -11,7 +11,7 @@ func CreateDeliveryLog(ctx context.Context, log *DeliveryLog) error {
 	return global.DB.WithContext(ctx).Create(log).Error
 }
 
-func ListDeliveryLogs(ctx context.Context, webhookID uint, page, pageSize int) ([]DeliveryLog, int64, error) {
+func ListDeliveryLogs(ctx context.Context, webhookID string, page, pageSize int) ([]DeliveryLog, int64, error) {
 	var items []DeliveryLog
 	var total int64
 	db := global.DB.WithContext(ctx).Model(&DeliveryLog{}).Where("webhook_id = ?", webhookID)

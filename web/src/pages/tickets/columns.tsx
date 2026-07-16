@@ -1,15 +1,62 @@
+import { useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
-import { IconEye } from '@tabler/icons-react'
+import { IconDotsVertical, IconEye } from '@tabler/icons-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { formatDateTime } from '@/lib/utils'
 import type { Ticket } from '@/lib/api/tickets'
 
 import { STATUS_CONFIG, STATUS_LABEL } from './constants'
 
+function parseInstructionRaw(json: string): string {
+  try {
+    const instructions = JSON.parse(json)
+    if (Array.isArray(instructions)) {
+      return instructions.map((i: { raw?: string }) => i.raw ?? '').join('\n')
+    }
+  } catch { /* ignore */ }
+  return json
+}
+
+function ActionDropdown({
+  row,
+  handleViewDetail,
+}: {
+  row: Ticket
+  handleViewDetail: (ticket: Ticket) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const itemClass =
+    'focus:bg-accent focus:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none w-full [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4'
+
+  return (
+    <HoverCard open={open} onOpenChange={setOpen} openDelay={0} closeDelay={100}>
+      <HoverCardTrigger asChild>
+        <Button
+          variant="ghost" size="sm"
+          className="h-8 w-8 p-0"
+          onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
+        >
+          <IconDotsVertical className="size-4" />
+        </Button>
+      </HoverCardTrigger>
+      <HoverCardContent align="end" sideOffset={4} className="w-32 p-1">
+        <button
+          type="button"
+          className={itemClass}
+          onClick={() => { setOpen(false); handleViewDetail(row) }}
+        >
+          <IconEye className="size-4" /> 查看
+        </button>
+      </HoverCardContent>
+    </HoverCard>
+  )
+}
+
 export function useTicketColumns(
-  projects: { id: number; name: string }[],
+  projects: { id: string; name: string }[],
   handleViewDetail: (ticket: Ticket) => void,
 ): ColumnDef<Ticket>[] {
   return [
@@ -23,7 +70,7 @@ export function useTicketColumns(
       accessorKey: 'project_id',
       header: '项目名称',
       cell: ({ row }) => {
-        const project = projects.find((p) => p.id === row.original.project_id)
+        const project = projects.find((p) => p.id === String(row.original.project_id))
         return project?.name ?? `#${row.original.project_id}`
       },
       meta: { label: '项目名称' },
@@ -35,15 +82,15 @@ export function useTicketColumns(
       meta: { label: '申请人' },
     },
     {
-      accessorKey: 'sql_snapshot',
-      header: 'SQL',
+      accessorKey: 'instruction_json',
+      header: '指令',
       cell: ({ row }) => {
-        const sql = row.original.sql_snapshot
+        const raw = parseInstructionRaw(row.original.instruction_json)
         return (
-          <span className="font-mono text-xs">{sql.length > 100 ? `${sql.slice(0, 100)}...` : sql}</span>
+          <span className="font-mono text-xs">{raw.length > 100 ? `${raw.slice(0, 100)}...` : raw}</span>
         )
       },
-      meta: { label: 'SQL' },
+      meta: { label: '指令' },
     },
     {
       accessorKey: 'status',
@@ -75,15 +122,11 @@ export function useTicketColumns(
       id: 'actions',
       enableHiding: false,
       header: '操作',
+      size: 64,
       cell: ({ row }) => (
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={() => handleViewDetail(row.original)}>
-            <IconEye className="size-4" />
-            {'查看'}
-          </Button>
-        </div>
+        <ActionDropdown row={row.original} handleViewDetail={handleViewDetail} />
       ),
-      meta: { label: '操作' },
+      meta: { label: '操作', pinned: 'right' as const },
     },
   ]
 }

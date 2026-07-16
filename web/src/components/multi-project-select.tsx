@@ -7,14 +7,14 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 interface Project {
-  id: number
+  id: string
   name: string
 }
 
 interface MultiProjectSelectProps {
   projects: Project[]
-  selectedIds: number[]
-  onChange: (ids: number[]) => void
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
 }
 
 export function MultiProjectSelect({ projects, selectedIds, onChange }: MultiProjectSelectProps) {
@@ -34,7 +34,7 @@ export function MultiProjectSelect({ projects, selectedIds, onChange }: MultiPro
     [projects, selectedIds],
   )
 
-  const toggleProject = (id: number) => {
+  const toggleProject = (id: string) => {
     if (selectedIds.includes(id)) {
       onChange(selectedIds.filter((i) => i !== id))
     } else {
@@ -42,7 +42,7 @@ export function MultiProjectSelect({ projects, selectedIds, onChange }: MultiPro
     }
   }
 
-  const removeProject = (id: number) => {
+  const removeProject = (id: string) => {
     onChange(selectedIds.filter((i) => i !== id))
   }
 

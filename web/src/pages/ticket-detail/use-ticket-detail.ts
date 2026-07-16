@@ -79,7 +79,7 @@ export function useTicketDetailPage() {
       await resubmitMutation.mutateAsync({
         id: ticketId,
         project_id: ticket.project_id,
-        sql_snapshot: ticket.sql_snapshot,
+        instruction_json: ticket.instruction_json,
         title: ticket.title,
         description: ticket.description,
       })

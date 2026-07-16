@@ -2,10 +2,11 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
 export interface CurrentUser {
-  id: number
+  id: string
   username: string
   nickname?: string
-  role_code?: string
+  email?: string
+  phone?: string
   status?: string
   created_at?: string
 }

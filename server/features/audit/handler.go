@@ -12,19 +12,14 @@ func NewHandler() *Handler {
 }
 
 func (h *Handler) List(c echo.Context) error {
-	var q ListQuery
-	q.NeedCount = true
-	if err := c.Bind(&q); err != nil {
+	pq, filters, err := response.ParseListQuery(c)
+	if err != nil {
 		return response.BadRequest(c, "invalid param")
 	}
-	if c.QueryParam("need_count") == "false" {
-		q.NeedCount = false
-	}
-	q.Normalize()
 
-	items, total, err := ListAuditLogs(c.Request().Context(), q)
+	items, total, err := ListAuditLogs(c.Request().Context(), pq, filters)
 	if err != nil {
 		return response.InternalError(c, "internal error")
 	}
-	return response.SuccessPage(c, items, total, q.Page, q.PageSize)
+	return response.SuccessPage(c, items, total, pq.Page, pq.PageSize)
 }

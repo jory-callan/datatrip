@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"czwlinux.cloud/go-friday-starter/global"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
+	"czwlinux.cloud/go-friday-starter/pkg/queryfilter"
 )
 
 func CreateWebhookRepo(ctx context.Context, w *Webhook) error {
@@ -15,45 +17,39 @@ func SaveWebhookRepo(ctx context.Context, w *Webhook) error {
 	return global.DB.WithContext(ctx).Save(w).Error
 }
 
-func GetWebhookByID(ctx context.Context, id uint) (*Webhook, error) {
+func GetWebhookByID(ctx context.Context, id string) (*Webhook, error) {
 	var w Webhook
-	if err := global.DB.WithContext(ctx).First(&w, id).Error; err != nil {
+	if err := global.DB.WithContext(ctx).Where("id = ?", id).First(&w).Error; err != nil {
 		return nil, err
 	}
 	return &w, nil
 }
 
-func ListWebhooks(ctx context.Context, query ListQuery) ([]Webhook, int64, error) {
+func ListWebhooks(ctx context.Context, pq response.PageQuery, filters map[string]string) ([]Webhook, int64, error) {
 	var items []Webhook
-	var total int64
 	db := global.DB.WithContext(ctx).Model(&Webhook{})
 
-	scope := strings.TrimSpace(query.Scope)
-	if scope != "" {
-		db = db.Where("scope = ?", scope)
-	}
-	if query.Enabled == "true" {
+	// 通用 filter（scope）
+	db = queryfilter.ApplyAll(db, filters, map[string]string{
+		"scope": "scope",
+	})
+
+	// enabled — 特殊布尔处理
+	if enabled := strings.TrimSpace(filters["enabled"]); enabled == "true" || enabled == "=true" {
 		db = db.Where("enabled = ?", true)
-	} else if query.Enabled == "false" {
+	} else if enabled == "false" || enabled == "=false" {
 		db = db.Where("enabled = ?", false)
 	}
 
-	if query.NeedCount {
-		if err := db.Count(&total).Error; err != nil {
-			return nil, 0, err
-		}
-	}
-	if err := db.Order("id desc").Offset(query.Offset()).Limit(query.PageSize).Find(&items).Error; err != nil {
+	total, err := queryfilter.Paginate(db.Order("id desc"), pq.Page, pq.PageSize, pq.NeedCount, &items)
+	if err != nil {
 		return nil, 0, err
-	}
-	if !query.NeedCount {
-		total = int64(len(items))
 	}
 	return items, total, nil
 }
 
-func DeleteWebhookByID(ctx context.Context, id uint) error {
-	return global.DB.WithContext(ctx).Delete(&Webhook{}, id).Error
+func DeleteWebhookByID(ctx context.Context, id string) error {
+	return global.DB.WithContext(ctx).Where("id = ?", id).Delete(&Webhook{}).Error
 }
 
 // ListEnabledWebhooksByEvent returns all enabled webhooks that match the given event.

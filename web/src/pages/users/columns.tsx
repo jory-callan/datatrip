@@ -1,13 +1,22 @@
+import { IconDotsVertical, IconEdit, IconKey, IconTrash, IconUserCheck } from '@tabler/icons-react'
 import { type ColumnDef } from '@tanstack/react-table'
-import { IconPencil, IconTrash } from '@tabler/icons-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { formatDateTime, cn } from '@/lib/utils'
 import type { User } from '@/lib/api/users'
 
 export function useUserColumns(
   openEdit: (user: User) => void,
+  openResetPassword: (user: User) => void,
+  openAssignRoles: (user: User) => void,
   handleDelete: (user: User) => void,
   isUpdating: boolean,
   isDeleting: boolean,
@@ -21,16 +30,6 @@ export function useUserColumns(
       meta: { label: '昵称' },
     },
     { accessorKey: 'username', header: '用户名', meta: { label: '用户名' } },
-    {
-      accessorKey: 'role_code',
-      header: '角色',
-      cell: ({ row }) => {
-        const role = row.original.role_code
-        if (!role) return '-'
-        return <Badge variant="outline" className="font-mono">{role}</Badge>
-      },
-      meta: { label: '角色' },
-    },
     {
       accessorKey: 'status',
       header: '状态',
@@ -56,19 +55,40 @@ export function useUserColumns(
       id: 'actions',
       enableHiding: false,
       header: '操作',
+      size: 64,
       cell: ({ row }) => (
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" disabled={isUpdating} onClick={() => openEdit(row.original)}>
-            <IconPencil className="size-4" />
-            {'编辑'}
-          </Button>
-          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={isDeleting} onClick={() => { void handleDelete(row.original) }}>
-            <IconTrash className="size-4" />
-            {'删除'}
-          </Button>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <IconDotsVertical className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem disabled={isUpdating} onClick={() => openEdit(row.original)}>
+              <IconEdit className="size-4 mr-2" />
+              编辑
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openResetPassword(row.original)}>
+              <IconKey className="size-4 mr-2" />
+              重置密码
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openAssignRoles(row.original)}>
+              <IconUserCheck className="size-4 mr-2" />
+              分配角色
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive"
+              disabled={isDeleting}
+              onClick={() => { void handleDelete(row.original) }}
+            >
+              <IconTrash className="size-4 mr-2" />
+              删除
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       ),
-      meta: { label: '操作' },
+      meta: { label: '操作', pinned: 'right' as const },
     },
   ]
 }

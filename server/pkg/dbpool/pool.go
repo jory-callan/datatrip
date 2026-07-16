@@ -9,40 +9,65 @@ import (
 
 	"czwlinux.cloud/go-friday-starter/features/datasource"
 	"czwlinux.cloud/go-friday-starter/global"
+	"czwlinux.cloud/go-friday-starter/pkg/driver"
+	"github.com/elastic/go-elasticsearch/v8"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
 )
 
 var (
 	mu    sync.RWMutex
-	pools = make(map[uint]*poolEntry)
+	pools = make(map[string]*poolEntry)
 
-	// Idle reaper configuration
-	idleTimeout = 30 * time.Minute  // pool idle before close
-	reapInterval = 5 * time.Minute  // reaper check interval
+	redisMu    sync.RWMutex
+	redisPools = make(map[string]*redisPoolEntry)
+
+	mongoMu    sync.RWMutex
+	mongoPools = make(map[string]*mongoPoolEntry)
+
+	esMu    sync.RWMutex
+	esPools = make(map[string]*esPoolEntry)
+
+	idleTimeout  = 30 * time.Minute
+	reapInterval = 5 * time.Minute
 )
 
-// poolEntry wraps a *sql.DB with last-used tracking.
 type poolEntry struct {
 	db       *sql.DB
 	lastUsed time.Time
 }
 
-// PoolStats holds connection pool statistics for a datasource.
-type PoolStats struct {
-	DatasourceID   uint      `json:"datasource_id"`
-	Active         int       `json:"active"`
-	Idle           int       `json:"idle"`
-	WaitCount      int64     `json:"wait_count"`
-	WaitDuration   string    `json:"wait_duration"`
-	LastUsedTime   time.Time `json:"last_used_time"`
-	IsConnected    bool      `json:"is_connected"`
+type redisPoolEntry struct {
+	client   *redis.Client
+	lastUsed time.Time
 }
 
-// Get returns a *sql.DB pool for the given datasource ID.
-// Lazily creates the pool if it does not exist.
-func Get(ctx context.Context, datasourceID uint) (*sql.DB, error) {
+type mongoPoolEntry struct {
+	client   *mongo.Client
+	lastUsed time.Time
+}
+
+type esPoolEntry struct {
+	client   *elasticsearch.Client
+	lastUsed time.Time
+}
+
+type PoolStats struct {
+	DatasourceID string    `json:"datasource_id"`
+	Type         string    `json:"type"`
+	Active       int       `json:"active"`
+	Idle         int       `json:"idle"`
+	WaitCount    int64     `json:"wait_count"`
+	WaitDuration string    `json:"wait_duration"`
+	LastUsedTime time.Time `json:"last_used_time"`
+	IsConnected  bool      `json:"is_connected"`
+}
+
+// Get 获取或创建 SQL 连接池
+func Get(ctx context.Context, datasourceID string) (*sql.DB, error) {
 	mu.RLock()
 	entry, ok := pools[datasourceID]
 	mu.RUnlock()
@@ -54,7 +79,6 @@ func Get(ctx context.Context, datasourceID uint) (*sql.DB, error) {
 	mu.Lock()
 	defer mu.Unlock()
 
-	// double-check
 	if entry, ok := pools[datasourceID]; ok {
 		entry.lastUsed = time.Now()
 		return entry.db, nil
@@ -65,8 +89,8 @@ func Get(ctx context.Context, datasourceID uint) (*sql.DB, error) {
 		return nil, fmt.Errorf("datasource not found: %w", err)
 	}
 
-	dsn, driverName := buildDSN(ds)
-	db, err := sql.Open(driverName, dsn)
+	driverName, dsnStr := buildDSN(ds)
+	db, err := sql.Open(driverName, dsnStr)
 	if err != nil {
 		return nil, fmt.Errorf("sql open: %w", err)
 	}
@@ -81,90 +105,323 @@ func Get(ctx context.Context, datasourceID uint) (*sql.DB, error) {
 	}
 
 	pools[datasourceID] = &poolEntry{db: db, lastUsed: time.Now()}
-	global.Log.Info("dbpool created", zap.Uint("datasource_id", datasourceID), zap.String("type", ds.Type))
+	global.Log.Info("dbpool created", zap.String("datasource_id", datasourceID), zap.String("type", ds.Type))
 	return db, nil
 }
 
-// Close closes and removes the pool for the given datasource ID.
-func Close(datasourceID uint) {
+// GetRedis 获取或创建 Redis 连接
+func GetRedis(ctx context.Context, datasourceID string) (*redis.Client, error) {
+	redisMu.RLock()
+	entry, ok := redisPools[datasourceID]
+	redisMu.RUnlock()
+	if ok {
+		entry.lastUsed = time.Now()
+		return entry.client, nil
+	}
+
+	redisMu.Lock()
+	defer redisMu.Unlock()
+
+	if entry, ok := redisPools[datasourceID]; ok {
+		entry.lastUsed = time.Now()
+		return entry.client, nil
+	}
+
+	ds, err := datasource.GetByID(ctx, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("datasource not found: %w", err)
+	}
+
+	opts := driver.RedisOptions(toConnConfig(ds))
+	client := redis.NewClient(opts)
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("redis ping failed: %w", err)
+	}
+
+	redisPools[datasourceID] = &redisPoolEntry{client: client, lastUsed: time.Now()}
+	global.Log.Info("redis pool created", zap.String("datasource_id", datasourceID))
+	return client, nil
+}
+
+// GetMongo 获取或创建 MongoDB 连接
+func GetMongo(ctx context.Context, datasourceID string) (*mongo.Client, error) {
+	mongoMu.RLock()
+	entry, ok := mongoPools[datasourceID]
+	mongoMu.RUnlock()
+	if ok {
+		entry.lastUsed = time.Now()
+		return entry.client, nil
+	}
+
+	mongoMu.Lock()
+	defer mongoMu.Unlock()
+
+	if entry, ok := mongoPools[datasourceID]; ok {
+		entry.lastUsed = time.Now()
+		return entry.client, nil
+	}
+
+	ds, err := datasource.GetByID(ctx, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("datasource not found: %w", err)
+	}
+
+	client, err := driver.ConnectMongo(ctx, toConnConfig(ds))
+	if err != nil {
+		return nil, err
+	}
+
+	mongoPools[datasourceID] = &mongoPoolEntry{client: client, lastUsed: time.Now()}
+	global.Log.Info("mongo pool created", zap.String("datasource_id", datasourceID))
+	return client, nil
+}
+
+// GetES 获取或创建 Elasticsearch 连接
+func GetES(ctx context.Context, datasourceID string) (*elasticsearch.Client, error) {
+	esMu.RLock()
+	entry, ok := esPools[datasourceID]
+	esMu.RUnlock()
+	if ok {
+		entry.lastUsed = time.Now()
+		return entry.client, nil
+	}
+
+	esMu.Lock()
+	defer esMu.Unlock()
+
+	if entry, ok := esPools[datasourceID]; ok {
+		entry.lastUsed = time.Now()
+		return entry.client, nil
+	}
+
+	ds, err := datasource.GetByID(ctx, datasourceID)
+	if err != nil {
+		return nil, fmt.Errorf("datasource not found: %w", err)
+	}
+
+	client, err := driver.NewESClient(toConnConfig(ds))
+	if err != nil {
+		return nil, err
+	}
+
+	esPools[datasourceID] = &esPoolEntry{client: client, lastUsed: time.Now()}
+	global.Log.Info("es pool created", zap.String("datasource_id", datasourceID))
+	return client, nil
+}
+
+func Close(datasourceID string) {
 	mu.Lock()
-	defer mu.Unlock()
 	if entry, ok := pools[datasourceID]; ok {
 		entry.db.Close()
 		delete(pools, datasourceID)
-		global.Log.Info("dbpool closed", zap.Uint("datasource_id", datasourceID))
 	}
+	mu.Unlock()
+
+	redisMu.Lock()
+	if entry, ok := redisPools[datasourceID]; ok {
+		entry.client.Close()
+		delete(redisPools, datasourceID)
+	}
+	redisMu.Unlock()
+
+	mongoMu.Lock()
+	if entry, ok := mongoPools[datasourceID]; ok {
+		entry.client.Disconnect(context.Background())
+		delete(mongoPools, datasourceID)
+	}
+	mongoMu.Unlock()
+
+	esMu.Lock()
+	if _, ok := esPools[datasourceID]; ok {
+		// ES client has no Close, it's HTTP-based
+		delete(esPools, datasourceID)
+	}
+	esMu.Unlock()
 }
 
-// CloseAll closes all pools. Used during shutdown.
 func CloseAll() {
 	mu.Lock()
-	defer mu.Unlock()
 	for id, entry := range pools {
 		entry.db.Close()
 		delete(pools, id)
 	}
+	mu.Unlock()
+
+	redisMu.Lock()
+	for id, entry := range redisPools {
+		entry.client.Close()
+		delete(redisPools, id)
+	}
+	redisMu.Unlock()
+
+	mongoMu.Lock()
+	for id, entry := range mongoPools {
+		entry.client.Disconnect(context.Background())
+		delete(mongoPools, id)
+	}
+	mongoMu.Unlock()
+
+	esMu.Lock()
+	for id, _ := range esPools {
+		delete(esPools, id)
+	}
+	esMu.Unlock()
+
 	global.Log.Info("dbpool: all pools closed")
 }
 
-// Reset removes all pools (for testing).
 func Reset() {
 	mu.Lock()
-	defer mu.Unlock()
 	for id, entry := range pools {
 		entry.db.Close()
 		delete(pools, id)
 	}
+	mu.Unlock()
+
+	redisMu.Lock()
+	for id, entry := range redisPools {
+		entry.client.Close()
+		delete(redisPools, id)
+	}
+	redisMu.Unlock()
+
+	mongoMu.Lock()
+	for id, entry := range mongoPools {
+		entry.client.Disconnect(context.Background())
+		delete(mongoPools, id)
+	}
+	mongoMu.Unlock()
+
+	esMu.Lock()
+	for id, _ := range esPools {
+		delete(esPools, id)
+	}
+	esMu.Unlock()
 }
 
-// GetPoolStats returns connection pool statistics for a specific datasource.
-func GetPoolStats(datasourceID uint) *PoolStats {
+func GetPoolStats(datasourceID string) *PoolStats {
+	stats := &PoolStats{DatasourceID: datasourceID}
+
 	mu.RLock()
 	entry, ok := pools[datasourceID]
 	mu.RUnlock()
-
-	stats := &PoolStats{
-		DatasourceID: datasourceID,
-		IsConnected:  ok,
-	}
 	if ok {
+		stats.Type = "sql"
+		stats.IsConnected = true
 		stats.LastUsedTime = entry.lastUsed
-		stats.Active = entry.db.Stats().InUse
-		stats.Idle = entry.db.Stats().Idle
-		stats.WaitCount = entry.db.Stats().WaitCount
-		stats.WaitDuration = entry.db.Stats().WaitDuration.String()
+		dbStats := entry.db.Stats()
+		stats.Active = dbStats.InUse
+		stats.Idle = dbStats.Idle
+		stats.WaitCount = dbStats.WaitCount
+		stats.WaitDuration = dbStats.WaitDuration.String()
+		return stats
 	}
+
+	redisMu.RLock()
+	rentry, rok := redisPools[datasourceID]
+	redisMu.RUnlock()
+	if rok {
+		stats.Type = "redis"
+		stats.IsConnected = true
+		stats.LastUsedTime = rentry.lastUsed
+		ps := rentry.client.PoolStats()
+		stats.Active = int(ps.TotalConns - ps.IdleConns)
+		stats.Idle = int(ps.IdleConns)
+		return stats
+	}
+
+	mongoMu.RLock()
+	mentry, mok := mongoPools[datasourceID]
+	mongoMu.RUnlock()
+	if mok {
+		stats.Type = "mongo"
+		stats.IsConnected = true
+		stats.LastUsedTime = mentry.lastUsed
+		return stats
+	}
+
+	esMu.RLock()
+	eentry, eok := esPools[datasourceID]
+	esMu.RUnlock()
+	if eok {
+		stats.Type = "es"
+		stats.IsConnected = true
+		stats.LastUsedTime = eentry.lastUsed
+		return stats
+	}
+
 	return stats
 }
 
-// ListAllPoolStats returns connection pool statistics for all active pools.
 func ListAllPoolStats() []*PoolStats {
+	var result []*PoolStats
+
 	mu.RLock()
-	defer mu.RUnlock()
-	result := make([]*PoolStats, 0, len(pools))
 	for id, entry := range pools {
-		stats := &PoolStats{
+		dbStats := entry.db.Stats()
+		result = append(result, &PoolStats{
 			DatasourceID: id,
+			Type:         "sql",
 			IsConnected:  true,
 			LastUsedTime: entry.lastUsed,
-		}
-		stats.Active = entry.db.Stats().InUse
-		stats.Idle = entry.db.Stats().Idle
-		stats.WaitCount = entry.db.Stats().WaitCount
-		stats.WaitDuration = entry.db.Stats().WaitDuration.String()
-		result = append(result, stats)
+			Active:       dbStats.InUse,
+			Idle:         dbStats.Idle,
+			WaitCount:    dbStats.WaitCount,
+			WaitDuration: dbStats.WaitDuration.String(),
+		})
 	}
+	mu.RUnlock()
+
+	redisMu.RLock()
+	for id, entry := range redisPools {
+		ps := entry.client.PoolStats()
+		result = append(result, &PoolStats{
+			DatasourceID: id,
+			Type:         "redis",
+			IsConnected:  true,
+			LastUsedTime: entry.lastUsed,
+			Active:       int(ps.TotalConns - ps.IdleConns),
+			Idle:         int(ps.IdleConns),
+		})
+	}
+	redisMu.RUnlock()
+
+	mongoMu.RLock()
+	for id, entry := range mongoPools {
+		result = append(result, &PoolStats{
+			DatasourceID: id,
+			Type:         "mongo",
+			IsConnected:  true,
+			LastUsedTime: entry.lastUsed,
+		})
+	}
+	mongoMu.RUnlock()
+
+	esMu.RLock()
+	for id, entry := range esPools {
+		result = append(result, &PoolStats{
+			DatasourceID: id,
+			Type:         "es",
+			IsConnected:  true,
+			LastUsedTime: entry.lastUsed,
+		})
+	}
+	esMu.RUnlock()
+
 	return result
 }
 
-// StartReaper starts a background goroutine that closes idle connection pools.
-// Call once during server startup (e.g., from cmd/service/start.go).
 func StartReaper() {
 	go func() {
 		ticker := time.NewTicker(reapInterval)
 		defer ticker.Stop()
 		for range ticker.C {
 			reapIdlePools()
+			reapIdleRedisPools()
+			reapIdleMongoPools()
+			reapIdleESPools()
 		}
 	}()
 	global.Log.Info("dbpool reaper started", zap.Duration("interval", reapInterval), zap.Duration("idle_timeout", idleTimeout))
@@ -178,24 +435,64 @@ func reapIdlePools() {
 		if now.Sub(entry.lastUsed) > idleTimeout {
 			entry.db.Close()
 			delete(pools, id)
-			global.Log.Info("dbpool reaped idle pool", zap.Uint("datasource_id", id))
+			global.Log.Info("dbpool reaped idle pool", zap.String("datasource_id", id))
 		}
 	}
 }
 
+func reapIdleRedisPools() {
+	redisMu.Lock()
+	defer redisMu.Unlock()
+	now := time.Now()
+	for id, entry := range redisPools {
+		if now.Sub(entry.lastUsed) > idleTimeout {
+			entry.client.Close()
+			delete(redisPools, id)
+			global.Log.Info("redis pool reaped idle", zap.String("datasource_id", id))
+		}
+	}
+}
+
+func reapIdleMongoPools() {
+	mongoMu.Lock()
+	defer mongoMu.Unlock()
+	now := time.Now()
+	for id, entry := range mongoPools {
+		if now.Sub(entry.lastUsed) > idleTimeout {
+			entry.client.Disconnect(context.Background())
+			delete(mongoPools, id)
+			global.Log.Info("mongo pool reaped idle", zap.String("datasource_id", id))
+		}
+	}
+}
+
+func reapIdleESPools() {
+	esMu.Lock()
+	defer esMu.Unlock()
+	now := time.Now()
+	for id, entry := range esPools {
+		if now.Sub(entry.lastUsed) > idleTimeout {
+			delete(esPools, id)
+			global.Log.Info("es pool reaped idle", zap.String("datasource_id", id))
+		}
+	}
+}
+
+func toConnConfig(ds *datasource.Datasource) driver.ConnConfig {
+	return driver.ConnConfig{
+		Type:     ds.Type,
+		Host:     ds.Host,
+		Port:     ds.Port,
+		Username: ds.Username,
+		Password: ds.Password,
+		Database: ds.Database,
+	}
+}
+
 func buildDSN(ds *datasource.Datasource) (string, string) {
-	switch ds.Type {
-	case datasource.TypeMySQL:
-		// user:password@tcp(host:port)/dbname?charset=utf8mb4&parseTime=True
-		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-			ds.Username, ds.Password, ds.Host, ds.Port, ds.Database)
-		return dsn, "mysql"
-	case datasource.TypePostgreSQL:
-		// postgres://user:***@host:port/dbname?sslmode=disable
-		dsn := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
-			ds.Username, ds.Password, ds.Host, ds.Port, ds.Database)
-		return dsn, "pgx"
-	default:
+	c, err := driver.GetSQLConnector(ds.Type)
+	if err != nil {
 		return "", ""
 	}
+	return c.DSN(toConnConfig(ds))
 }

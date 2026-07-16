@@ -27,14 +27,13 @@ function AppContent() {
         defaultOpen={true}
         open={sidebarOpen}
         onOpenChange={handleSidebarChange}
-        className="!min-h-dvh !h-auto !overflow-visible"
       >
         <AppSidebar variant="inset" />
-        <SidebarInset className="min-h-dvh">
+        <SidebarInset className="overflow-hidden">
           <SiteHeader />
-          <div className="@container/main flex flex-1 flex-col">
-            <div className="flex flex-1 flex-col gap-2 py-2 md:gap-3">
-              <div className="px-4 lg:px-6">
+          <div className="@container/main flex flex-1 flex-col min-h-0 overflow-y-auto">
+            <div className="flex flex-1 flex-col gap-2 py-2 md:gap-3 min-h-0">
+              <div className="px-4 lg:px-6 flex flex-1 flex-col min-h-0">
                 <ErrorBoundary key={location.pathname}>
                   <Outlet />
                 </ErrorBoundary>

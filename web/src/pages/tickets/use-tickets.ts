@@ -11,17 +11,21 @@ import {
 } from '@/lib/api/tickets'
 import type { Ticket } from '@/lib/api/tickets'
 
+import { useTicketStore } from './store'
+
 export function useTicketsPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [scope, setScope] = useState<'my' | 'pending' | 'all'>('my')
   const [statusFilter, setStatusFilter] = useState('')
   const [projectFilter, setProjectFilter] = useState<string>('')
-  const [selectedTicketId, setSelectedTicketId] = useState<number | null>(null)
-  const [detailOpen, setDetailOpen] = useState(false)
-  const [approveOpen, setApproveOpen] = useState(false)
-  const [rejectOpen, setRejectOpen] = useState(false)
-  const [comment, setComment] = useState('')
+
+  // Store
+  const selectedTicketId = useTicketStore((s) => s.selectedTicketId)
+  const closeDetail = useTicketStore((s) => s.closeDetail)
+  const setApproveOpen = useTicketStore((s) => s.setApproveOpen)
+  const setRejectOpen = useTicketStore((s) => s.setRejectOpen)
+  const resetComment = useTicketStore((s) => s.resetComment)
 
   const projectsQuery = useProjects({ page: 1, pageSize: 200, needCount: false })
   const projects = projectsQuery.data?.list ?? []
@@ -38,27 +42,26 @@ export function useTicketsPage() {
   const rejectMutation = useRejectTicket()
 
   const handleViewDetail = useCallback((ticket: Ticket) => {
-    setSelectedTicketId(ticket.id)
-    setDetailOpen(true)
+    useTicketStore.getState().openDetail(ticket.id)
   }, [])
 
   const handleOpenApprove = useCallback(() => {
-    setComment('')
-    setApproveOpen(true)
+    useTicketStore.getState().openApprove()
   }, [])
 
   const handleOpenReject = useCallback(() => {
-    setComment('')
-    setRejectOpen(true)
+    useTicketStore.getState().openReject()
   }, [])
 
   const handleApprove = async () => {
     if (selectedTicketId == null) return
+    const comment = useTicketStore.getState().comment
     try {
       await approveMutation.mutateAsync({ id: selectedTicketId, comment: comment || undefined })
       toast.success('工单已批准')
       setApproveOpen(false)
-      setComment('')
+      closeDetail()
+      resetComment()
     } catch (error) {
       toast.error(getApiErrorMessage(error, '审批失败'))
     }
@@ -66,6 +69,7 @@ export function useTicketsPage() {
 
   const handleReject = async () => {
     if (selectedTicketId == null) return
+    const comment = useTicketStore.getState().comment
     if (!comment) {
       toast.error('请填写拒绝原因')
       return
@@ -74,7 +78,8 @@ export function useTicketsPage() {
       await rejectMutation.mutateAsync({ id: selectedTicketId, comment })
       toast.success('工单已拒绝')
       setRejectOpen(false)
-      setComment('')
+      closeDetail()
+      resetComment()
     } catch (error) {
       toast.error(getApiErrorMessage(error, '拒绝失败'))
     }
@@ -84,11 +89,6 @@ export function useTicketsPage() {
     page, setPage, pageSize, setPageSize,
     scope, setScope, statusFilter, setStatusFilter,
     projectFilter, setProjectFilter,
-    selectedTicketId, setSelectedTicketId,
-    detailOpen, setDetailOpen,
-    approveOpen, setApproveOpen,
-    rejectOpen, setRejectOpen,
-    comment, setComment,
     projects, query, data, refetch,
     detailQuery, approveMutation, rejectMutation,
     handleViewDetail, handleOpenApprove, handleOpenReject,

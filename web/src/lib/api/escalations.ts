@@ -3,13 +3,13 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { apiClient } from '../api-client'
 
 export interface Escalation {
-  id: number
-  user_id: number
-  project_id: number
+  id: string
+  user_id: string
+  project_id: string
   reason: string
   status: 'pending' | 'approved' | 'rejected' | 'expired'
-  expires_at: string
-  approved_by?: number
+  expires_at?: string
+  approved_by?: string
   approved_at?: string
   created_at: string
 }
@@ -19,7 +19,7 @@ export interface EscalationListParams {
   pageSize: number
   needCount?: boolean
   scope?: 'my' | 'pending' | 'all'
-  project_id?: number
+  project_id?: string
   status?: string
 }
 
@@ -45,7 +45,7 @@ export const useEscalations = ({ page, pageSize, needCount = true, scope, projec
         page_size: pageSize,
         need_count: String(needCount),
         ...(scope ? { scope } : {}),
-        ...(project_id ? { project_id: String(project_id) } : {}),
+        ...(project_id ? { project_id } : {}),
         ...(status ? { status } : {}),
       },
     }),
@@ -53,11 +53,11 @@ export const useEscalations = ({ page, pageSize, needCount = true, scope, projec
   })
 }
 
-export const useActiveEscalation = (projectId: number | undefined) => {
+export const useActiveEscalation = (projectId: string | undefined) => {
   return useQuery({
     queryKey: ['escalation-active', projectId],
     queryFn: () => apiClient<ActiveEscalationResponse>(`/escalations/active`, {
-      query: { project_id: String(projectId!) },
+      query: { project_id: projectId! },
     }),
     enabled: !!projectId,
   })
@@ -66,7 +66,7 @@ export const useActiveEscalation = (projectId: number | undefined) => {
 export const useCreateEscalation = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: { project_id: number; reason: string }) =>
+    mutationFn: (data: { project_id: string; reason: string }) =>
       apiClient<Escalation>('/escalations', {
         method: 'POST',
         body: data,
@@ -81,7 +81,7 @@ export const useCreateEscalation = () => {
 export const useApproveEscalation = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, duration }: { id: number; duration?: string }) =>
+    mutationFn: ({ id, duration }: { id: string; duration?: string }) =>
       apiClient<Escalation>(`/escalations/${id}/approve`, {
         method: 'POST',
         body: { duration },
@@ -96,9 +96,50 @@ export const useApproveEscalation = () => {
 export const useRejectEscalation = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id }: { id: number }) =>
+    mutationFn: ({ id }: { id: string }) =>
       apiClient<Escalation>(`/escalations/${id}/reject`, {
         method: 'POST',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['escalations'] })
+      queryClient.invalidateQueries({ queryKey: ['escalation-active'] })
+    },
+  })
+}
+
+export const useUpdateEscalation = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      apiClient<Escalation>(`/escalations/${id}`, {
+        method: 'PUT',
+        body: { reason },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['escalations'] })
+    },
+  })
+}
+
+export const useDeleteEscalation = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiClient<null>(`/escalations/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['escalations'] })
+      queryClient.invalidateQueries({ queryKey: ['escalation-active'] })
+    },
+  })
+}
+
+export const useBatchDeleteEscalations = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: string[]) =>
+      apiClient<null>('/escalations/batch', {
+        method: 'DELETE',
+        body: { ids },
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['escalations'] })

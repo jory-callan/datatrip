@@ -2,15 +2,13 @@ package webhook
 
 import (
 	"time"
-
-	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
 )
 
 type DTO struct {
-	ID        uint      `json:"id"`
+	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Scope     string    `json:"scope"`
-	ProjectID uint      `json:"project_id"`
+	ProjectID string    `json:"project_id"`
 	URL       string    `json:"url"`
 	Enabled   bool      `json:"enabled"`
 	Events    []string  `json:"events"`
@@ -18,16 +16,10 @@ type DTO struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-type ListQuery struct {
-	response.PageQuery
-	Scope   string `query:"scope" json:"scope"`
-	Enabled string `query:"enabled" json:"enabled"`
-}
-
 type CreateRequest struct {
 	Name      string   `json:"name"`
 	Scope     string   `json:"scope"`
-	ProjectID uint     `json:"project_id"`
+	ProjectID string   `json:"project_id"`
 	URL       string   `json:"url"`
 	Enabled   bool     `json:"enabled"`
 	Events    []string `json:"events"`

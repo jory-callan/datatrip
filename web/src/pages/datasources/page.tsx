@@ -1,232 +1,219 @@
-import { IconDatabase, IconPlugConnected } from '@tabler/icons-react'
+import { useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { toast } from 'sonner'
 
-import { DataTable } from '@/components/common/data-table'
-import { FormDialog, FormField, FormGroup } from '@/components/common/form-dialog'
-import { Button } from '@/components/ui/button'
+import { DataTable } from '@/components/data-table'
 import { Card, CardContent } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
+import { useConfirmDelete } from '@/hooks/use-confirm-delete'
+import { getApiErrorMessage } from '@/lib/api-client'
 import {
-  Select, SelectContent, SelectItem,
-  SelectTrigger, SelectValue,
-} from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
+  useBatchDeleteDatasource,
+  useCreateDatasource,
+  useDatasourceTypes,
+  useDatasources,
+  useDeleteDatasource,
+  useTestDatasource,
+  useUpdateDatasource,
+} from '@/lib/api/datasources'
+import type { UpdateDatasourceInput } from '@/lib/api/datasources'
 
 import { useDatasourceColumns } from './columns'
-import { useDatasourcesPage } from './use-datasources'
-import type { CreateDatasourceInput } from '@/lib/api/datasources'
-
-const DS_TYPES = ['mysql', 'postgresql'] as const
-type DatasourceType = typeof DS_TYPES[number]
-
-interface DatasourceFormDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  title: string
-  description: string
-  form: CreateDatasourceInput
-  setForm: (fn: (f: CreateDatasourceInput) => CreateDatasourceInput) => void
-  onSave: () => void
-  isPending: boolean
-  editingID: number | null
-  onTest?: (id: number) => void
-  isTesting: boolean
-}
-
-function DatasourceFormDialog({
-  open, onOpenChange, title, description,
-  form, setForm, onSave, isPending, editingID,
-  onTest, isTesting,
-}: DatasourceFormDialogProps) {
-
-  const update = <K extends keyof CreateDatasourceInput>(
-    key: K, value: CreateDatasourceInput[K],
-  ) => setForm((f) => ({ ...f, [key]: value }))
-
-  return (
-    <FormDialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={
-        <span className="flex items-center gap-2">
-          <IconDatabase className="size-5 text-primary" />
-          {title}
-        </span>
-      }
-      description={description}
-      footer={
-        <>
-          {onTest && editingID != null ? (
-            <Button
-              variant="outline"
-              disabled={isTesting}
-              onClick={() => onTest(editingID)}
-            >
-              <IconPlugConnected className="size-4" />
-              {isTesting ? '测试中…' : '测试连接'}
-            </Button>
-          ) : null}
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button onClick={onSave} disabled={isPending}>
-            {isPending ? '保存中…' : '保存'}
-          </Button>
-        </>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        <FormGroup title="基本信息" description="数据源的展示信息和分类">
-          <FormField label="名称" span={1} required>
-            <Input
-              value={form.name}
-              onChange={(e) => update('name', e.target.value)}
-              placeholder="例如：订单库主库"
-            />
-          </FormField>
-          <FormField label="类型" span={1} required>
-            <Select
-              value={form.type}
-              onValueChange={(v) => update('type', v as DatasourceType)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DS_TYPES.map((v) => (
-                  <SelectItem key={v} value={v}>{v}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FormField>
-          <FormField label="备注" span={2}>
-            <Textarea
-              value={form.remark ?? ''}
-              onChange={(e) => update('remark', e.target.value)}
-              placeholder="选填，描述此数据源的用途"
-              rows={2}
-            />
-          </FormField>
-        </FormGroup>
-
-        <FormGroup title="连接配置" description="数据库的连接信息，密码在编辑时留空则保持不变">
-          <FormField label="主机" span={1} required>
-            <Input
-              value={form.host}
-              onChange={(e) => update('host', e.target.value)}
-              placeholder="例如：127.0.0.1"
-            />
-          </FormField>
-          <FormField label="端口" span={1} required>
-            <Input
-              type="number"
-              value={form.port}
-              onChange={(e) => update('port', Number(e.target.value))}
-            />
-          </FormField>
-          <FormField label="数据库" span={1} hint="选填，留空可连接后选择">
-            <Input
-              value={form.database ?? ''}
-              onChange={(e) => update('database', e.target.value)}
-              placeholder="例如：orders"
-            />
-          </FormField>
-          <FormField label="用户名" span={1} required>
-            <Input
-              value={form.username}
-              onChange={(e) => update('username', e.target.value)}
-              autoComplete="off"
-            />
-          </FormField>
-          <FormField
-            label="密码"
-            span={2}
-            required={!editingID}
-            hint={editingID ? '留空则保持原密码不变' : undefined}
-          >
-            <Input
-              type="password"
-              value={form.password}
-              onChange={(e) => update('password', e.target.value)}
-              placeholder={editingID ? '留空则不修改密码' : '请输入密码'}
-              autoComplete="new-password"
-            />
-          </FormField>
-        </FormGroup>
-      </div>
-    </FormDialog>
-  )
-}
+import { DatasourceSheet } from './datasource-sheet'
+import { useDatasourceStore } from './store'
 
 export function DatasourcesPage() {
-  const {
-    page, setPage, pageSize, setPageSize,
-    createOpen, setCreateOpen, editOpen, setEditOpen,
-    editingID, form, setForm,
-    query, data, refetch,
-    createMutation, updateMutation, deleteMutation, testMutation,
-    handleCreate, handleUpdate, handleDelete,
-    handleTestConnection, openEdit, resetForm, needCount,
-  } = useDatasourcesPage()
+  const [sp, setSp] = useSearchParams()
+  const page = Number(sp.get('page')) || 1
+  const pageSize = Number(sp.get('pageSize')) || 20
+  const filterType = sp.get('type') || '_all'
+
+  const setPage = useCallback((p: number) => {
+    setSp((prev) => { prev.set('page', String(p)); return prev })
+  }, [setSp])
+  const setPageSize = useCallback((ps: number) => {
+    setSp((prev) => { prev.set('pageSize', String(ps)); prev.set('page', '1'); return prev })
+  }, [setSp])
+
+  // zustand store
+  const { createOpen, editingID, form, setCreateOpen, resetForm } = useDatasourceStore()
+
+  // API
+  const query = useDatasources({ page, pageSize, needCount: true })
+  const { data, refetch } = query
+  const createMutation = useCreateDatasource()
+  const updateMutation = useUpdateDatasource()
+  const deleteMutation = useDeleteDatasource()
+  const testMutation = useTestDatasource()
+  const batchDeleteMutation = useBatchDeleteDatasource()
+
+  const typesQuery = useDatasourceTypes()
+  const typeOptions = useMemo(() => {
+    if (!typesQuery.data || typesQuery.data.length === 0) return [{ value: 'mysql', label: 'MySQL' }]
+    return typesQuery.data.flatMap((g) => g.types.map((t) => ({ value: t.type, label: t.label })))
+  }, [typesQuery.data])
+
+  // Confirm dialog
+  const { confirm, ConfirmDialog } = useConfirmDelete()
+
+  // Client-side filter: by type
+  const filteredList = useMemo(() => {
+    const list = data?.list ?? []
+    if (filterType === '_all') return list
+    return list.filter((ds) => ds.type === filterType)
+  }, [data, filterType])
+
+  // Handlers
+  const handleCreate = async () => {
+    if (!form.name || !form.host || !form.username || !form.password) {
+      toast.error('请填写必填字段')
+      return
+    }
+    try {
+      await createMutation.mutateAsync(form)
+      toast.success('数据源创建成功')
+      setCreateOpen(false)
+      resetForm()
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '数据源创建失败'))
+    }
+  }
+
+  const handleUpdate = async () => {
+    if (!editingID) return
+    if (!form.name || !form.host || !form.username) {
+      toast.error('请填写必填字段')
+      return
+    }
+    try {
+      const payload: UpdateDatasourceInput = { id: editingID, ...form }
+      if (!payload.password) delete payload.password
+      await updateMutation.mutateAsync(payload)
+      toast.success('数据源更新成功')
+      resetForm()
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '数据源更新失败'))
+    }
+  }
+
+  const handleDelete = useCallback(async (ds: { id: string; name: string }) => {
+    const ok = await confirm({
+      title: '删除数据源',
+      description: `确认删除数据源「${ds.name}」？删除后不可恢复。`,
+    })
+    if (!ok) return
+    try {
+      await deleteMutation.mutateAsync(ds.id)
+      toast.success('数据源删除成功')
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '数据源删除失败'))
+    }
+  }, [deleteMutation, confirm])
+
+  const handleBatchDelete = useCallback(async (rows: { id: string }[]) => {
+    const ok = await confirm({
+      title: '批量删除数据源',
+      description: `确认删除选中的 ${rows.length} 个数据源？删除后不可恢复。`,
+    })
+    if (!ok) return
+    try {
+      await batchDeleteMutation.mutateAsync(rows.map((r) => r.id))
+      toast.success(`已删除 ${rows.length} 个数据源`)
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '批量删除失败'))
+    }
+  }, [batchDeleteMutation, confirm])
+
+  const handleTestConnection = useCallback(async (id: string) => {
+    try {
+      const result = await testMutation.mutateAsync(id)
+      if (result.success) {
+        toast.success(result.message || '连接测试成功')
+      } else {
+        toast.error(result.message || '连接测试失败')
+      }
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '连接测试失败'))
+    }
+  }, [testMutation])
 
   const columns = useDatasourceColumns(
-    openEdit, handleDelete,
-    updateMutation.isPending, deleteMutation.isPending,
+    (ds) => useDatasourceStore.getState().openEdit(ds),
+    handleDelete,
+    handleTestConnection,
+    updateMutation.isPending,
+    deleteMutation.isPending,
   )
 
+  const openCreate = useCallback(() => {
+    resetForm()
+    setCreateOpen(true)
+  }, [setCreateOpen, resetForm])
+
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">{'数据源管理'}</h1>
-        <p className="text-sm text-muted-foreground">{'管理数据库连接信息'}</p>
+    <div className="flex flex-col gap-3">
+      <div className="flex items-baseline gap-2 shrink-0">
+        <h1 className="text-lg font-bold tracking-tight">数据源管理</h1>
+        <span className="text-xs text-muted-foreground">管理数据库连接信息</span>
       </div>
 
       <Card>
         <CardContent className="p-0">
           <DataTable
             columns={columns}
-            data={data?.list ?? []}
+            data={filteredList}
             loading={query.isFetching}
-            emptyText={'暂无数据源'}
-            storageKey="table:datasources:columns"
-            getRowId={(row) => String(row.id)}
+            emptyText="暂无数据源"
+            enableRowSelection
+            getRowId={(row) => row.id}
+            filters={[
+              {
+                id: 'type',
+                label: '类型',
+                type: 'select',
+                defaultValue: '_all',
+                options: [
+                  { value: '_all', label: '全部类型' },
+                  ...typeOptions,
+                ],
+              },
+            ]}
+            filterValues={{ type: filterType }}
+            onFiltersChange={(values) => {
+              setSp((prev) => {
+                if (values.type && values.type !== '_all') prev.set('type', values.type)
+                else prev.delete('type')
+                prev.set('page', '1')
+                return prev
+              })
+            }}
             toolbar={{
-              searchPlaceholder: '搜索数据源...',
               createLabel: '新增数据源',
-              onCreate: () => setCreateOpen(true),
+              onCreate: openCreate,
               onRefresh: () => { void refetch() },
+              onBatchDelete: handleBatchDelete,
             }}
             pagination={{
               page, pageSize,
-              total: data?.total ?? 0, needCount,
+              total: data?.total,
+              needCount: true,
               pageSizeOptions: [10, 20, 50, 100],
               onPageChange: setPage,
-              onPageSizeChange: (nextPageSize) => { setPageSize(nextPageSize); setPage(1) },
+              onPageSizeChange: setPageSize,
             }}
           />
         </CardContent>
       </Card>
 
-      <DatasourceFormDialog
-        open={createOpen}
-        onOpenChange={(open) => { setCreateOpen(open); if (!open) resetForm() }}
-        title={'新增数据源'}
-        description={'添加一个新的数据库连接'}
-        form={form} setForm={setForm}
-        onSave={handleCreate} isPending={createMutation.isPending}
-        editingID={null}
-        isTesting={false}
+      <DatasourceSheet
+        typeOptions={typeOptions}
+        onSave={createOpen ? handleCreate : handleUpdate}
+        isPending={createMutation.isPending || updateMutation.isPending}
+        editingID={editingID}
+        onTest={editingID ? handleTestConnection : undefined}
+        isTesting={testMutation.isPending}
       />
 
-      <DatasourceFormDialog
-        open={editOpen}
-        onOpenChange={(open) => { setEditOpen(open); if (!open) { resetForm() } }}
-        title={'编辑数据源'}
-        description={'修改数据库连接信息'}
-        form={form} setForm={setForm}
-        onSave={handleUpdate} isPending={updateMutation.isPending}
-        editingID={editingID}
-        onTest={handleTestConnection} isTesting={testMutation.isPending}
-      />
+      <ConfirmDialog />
     </div>
   )
 }

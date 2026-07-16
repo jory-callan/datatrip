@@ -1,21 +1,84 @@
+import { useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
-import { IconPencil, IconTrash, IconUsers } from '@tabler/icons-react'
+import { IconDotsVertical, IconEdit, IconTrash, IconUsers } from '@tabler/icons-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { formatDateTime } from '@/lib/utils'
-import type { DbProject } from '@/lib/api'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
+import { cn } from '@/lib/utils'
+import type { DataProject } from '@/lib/api/projects'
+
+function ActionDropdown({
+  row,
+  openMembers,
+  openEdit,
+  handleDelete,
+  isUpdating,
+  isDeleting,
+}: {
+  row: DataProject
+  openMembers: (proj: DataProject) => void
+  openEdit: (proj: DataProject) => void
+  handleDelete: (proj: DataProject) => void
+  isUpdating: boolean
+  isDeleting: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const itemClass =
+    'focus:bg-accent focus:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none w-full [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4'
+  const destClass =
+    'text-destructive focus:bg-destructive/10 dark:focus:bg-destructive/20 focus:text-destructive [&_svg]:!text-destructive'
+
+  return (
+    <HoverCard open={open} onOpenChange={setOpen} openDelay={0} closeDelay={100}>
+      <HoverCardTrigger asChild>
+        <Button
+          variant="ghost" size="sm"
+          className="h-8 w-8 p-0"
+          onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
+        >
+          <IconDotsVertical className="size-4" />
+        </Button>
+      </HoverCardTrigger>
+      <HoverCardContent align="end" sideOffset={4} className="w-40 p-1">
+        <button
+          type="button"
+          className={itemClass}
+          onClick={() => { setOpen(false); openMembers(row) }}
+        >
+          <IconUsers className="size-4" /> 成员管理
+        </button>
+        <button
+          type="button"
+          disabled={isUpdating}
+          className={cn(itemClass, isUpdating && 'opacity-50 pointer-events-none')}
+          onClick={() => { setOpen(false); openEdit(row) }}
+        >
+          <IconEdit className="size-4" /> 编辑
+        </button>
+        <div className="h-px bg-border my-1" />
+        <button
+          type="button"
+          disabled={isDeleting}
+          className={cn(itemClass, destClass, isDeleting && 'opacity-50 pointer-events-none')}
+          onClick={() => { setOpen(false); void handleDelete(row) }}
+        >
+          <IconTrash className="size-4" /> 删除
+        </button>
+      </HoverCardContent>
+    </HoverCard>
+  )
+}
 
 export function useProjectColumns(
-  datasources: { id: number; name: string }[],
-  openMembers: (proj: DbProject) => void,
-  openEdit: (proj: DbProject) => void,
-  handleDelete: (proj: DbProject) => void,
+  datasources: { id: string; name: string }[],
+  openMembers: (proj: DataProject) => void,
+  openEdit: (proj: DataProject) => void,
+  handleDelete: (proj: DataProject) => void,
   isUpdating: boolean,
   isDeleting: boolean,
-): ColumnDef<DbProject>[] {
+): ColumnDef<DataProject>[] {
   return [
-    { accessorKey: 'id', header: 'ID', meta: { label: 'ID' } },
     { accessorKey: 'name', header: '项目名称', meta: { label: '项目名称' } },
     {
       id: 'datasource_id',
@@ -27,14 +90,14 @@ export function useProjectColumns(
       meta: { label: '数据源' },
     },
     {
-      accessorKey: 'databases',
-      header: '数据库',
+      accessorKey: 'scope',
+      header: '资源范围',
       cell: ({ row }) => {
-        const dbs = row.original.databases
-        if (!dbs || dbs.length === 0) return '-'
-        return dbs.map((db) => (db === '*' ? '\u6240\u6709\u6570\u636e\u5e93' : db.includes('*') || db.includes('?') ? db : db)).join(', ')
+        const scope = row.original.scope
+        if (!scope || scope.length === 0) return <span className="text-muted-foreground">-</span>
+        return scope.join(', ')
       },
-      meta: { label: '数据库' },
+      meta: { label: '资源范围' },
     },
     {
       accessorKey: 'approval_mode',
@@ -48,30 +111,30 @@ export function useProjectColumns(
     {
       accessorKey: 'created_at',
       header: '创建时间',
-      cell: ({ row }) => formatDateTime(row.original.created_at),
+      cell: ({ row }) => {
+        const d = row.original.created_at
+        if (!d) return <span className="text-muted-foreground">-</span>
+        return <span className="text-xs">{d.slice(0, 16).replace('T', ' ')}</span>
+      },
       meta: { label: '创建时间' },
+      size: 140,
     },
     {
       id: 'actions',
       enableHiding: false,
       header: '操作',
+      size: 64,
       cell: ({ row }) => (
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={() => openMembers(row.original)}>
-            <IconUsers className="size-4" />
-            {'成员管理'}
-          </Button>
-          <Button variant="ghost" size="sm" disabled={isUpdating} onClick={() => openEdit(row.original)}>
-            <IconPencil className="size-4" />
-            {'编辑'}
-          </Button>
-          <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" disabled={isDeleting} onClick={() => { void handleDelete(row.original) }}>
-            <IconTrash className="size-4" />
-            {'删除'}
-          </Button>
-        </div>
+        <ActionDropdown
+          row={row.original}
+          openMembers={openMembers}
+          openEdit={openEdit}
+          handleDelete={handleDelete}
+          isUpdating={isUpdating}
+          isDeleting={isDeleting}
+        />
       ),
-      meta: { label: '操作' },
+      meta: { label: '操作', pinned: 'right' as const },
     },
   ]
 }

@@ -115,6 +115,39 @@ src/
 - 使用 TailwindCSS 类名，不写自定义 CSS
 - TS/TSX 文件名使用 kebab-case，组件名使用 PascalCase
 
+## 弹窗 / 侧边栏规范
+
+| 用途 | 组件 | 理由 |
+|------|------|------|
+| 新增 / 编辑表单（3+ 字段） | Sheet | 全高视图，高度固定不跳动，适合多 tab 或复杂配置 |
+| 查看详情（多 section） | Sheet | 右侧滑入，不覆盖列表上下文 |
+| 成员管理、关联配置等面板 | Sheet | 与主表单风格保持一致 |
+| 确认类操作（删除、状态变更） | Dialog / AlertDialog | 轻量中断式交互，无需大面板 |
+| 单字段表单（输入名称） | Dialog | 一两行字段，弹窗够轻 |
+| 提示 / 通知 | sonner toast | 非阻塞，统一 toast 方案 |
+
+**原则：** CRUD 表单优先使用 Sheet；Dialog 回归其本来的职责——确认和轻量交互。不混用，不互相替代。
+
+## 页面目录规范
+
+适用于 `pages/<route>/` 下的每个页面：
+
+- **page.tsx** — 入口文件，只负责组装子组件和全局逻辑（URL 参数、API 调用），不做视图渲染
+- **store.ts** — 页面级 zustand store（不放到 `src/stores/`），管理表单/弹窗/选择等跨组件状态
+- **columns.tsx** — 列定义（DataTable 使用），单独文件
+- 一个界面拆分多个子文件，**单文件不超 300 行**
+- 数据和展示分离：API/mutation 在 page.tsx，视图组件抽离为子文件
+- 参数优先通过路由 URL 传递（`useSearchParams`），刷新/分享保留状态
+- ID 列默认不展示（隐藏主键）
+- 表格标配批量删除：`enableRowSelection` + `onBatchDelete`
+- 后端字段名对齐：避免 `description`/`remark` 混淆，以后端 DTO 为准
+
+## 布局风格
+
+- **信息密集型布局**，间隙小
+- 表格上方不设分隔 Card，标题紧凑（`text-lg`），操作栏和表格连成一体
+- 行高、间距使用 `gap-2`/`gap-3` 级别，不滥用 `gap-6`/`py-4` 等大间距
+
 ## 表格规范
 
 - 分页表格优先使用 `src/components/common/data-table.tsx`

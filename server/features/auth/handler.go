@@ -3,9 +3,9 @@ package auth
 import (
 	"errors"
 
+	"czwlinux.cloud/go-friday-starter/features/user"
 	"czwlinux.cloud/go-friday-starter/pkg/authctx"
 	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
-	"czwlinux.cloud/go-friday-starter/features/user"
 	"github.com/labstack/echo/v4"
 )
 

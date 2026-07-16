@@ -1,1 +1,1 @@
-export { PermissionConfigPage } from './page'
+export { PermissionCodesPage } from './page'

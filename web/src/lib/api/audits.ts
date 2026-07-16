@@ -3,17 +3,18 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { apiClient } from '../api-client'
 
 export interface AuditLog {
-  id: number
-  actor_id: number
-  project_id: number
-  datasource_id: number
+  id: string
+  actor_id: string
+  project_id: string
+  datasource_id: string
   action: string
-  sql: string
+  raw_text: string
+  instruction_json: string
   classification: string
   status: string
   duration_ms: number
   error_message?: string
-  ticket_id?: number
+  ticket_id?: string
   ip: string
   created_at: string
 }
@@ -22,9 +23,9 @@ export interface AuditListParams {
   page: number
   pageSize: number
   needCount?: boolean
-  actor_id?: number
-  project_id?: number
-  datasource_id?: number
+  actor_id?: string
+  project_id?: string
+  datasource_id?: string
   action?: string
   status?: string
   classification?: string
@@ -47,9 +48,9 @@ export const useAudits = ({ page, pageSize, needCount = true, actor_id, project_
         page,
         page_size: pageSize,
         need_count: String(needCount),
-        ...(actor_id ? { actor_id: String(actor_id) } : {}),
-        ...(project_id ? { project_id: String(project_id) } : {}),
-        ...(datasource_id ? { datasource_id: String(datasource_id) } : {}),
+        ...(actor_id ? { actor_id } : {}),
+        ...(project_id ? { project_id } : {}),
+        ...(datasource_id ? { datasource_id } : {}),
         ...(action ? { action } : {}),
         ...(status ? { status } : {}),
         ...(classification ? { classification } : {}),

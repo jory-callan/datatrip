@@ -6,11 +6,16 @@ import {
   useCreateEscalation,
   useApproveEscalation,
   useRejectEscalation,
+  useUpdateEscalation,
+  useDeleteEscalation,
+  useBatchDeleteEscalations,
   useEscalations,
   type Escalation,
 } from '@/lib/api/escalations'
 import { useProjects } from '@/lib/api/projects'
 import { useAppStore } from '@/stores/app-store'
+
+import { useEscalationStore } from './store'
 
 export const STATUS_CONFIG: Record<string, { className: string }> = {
   pending: { className: 'bg-yellow-100 text-yellow-800' },
@@ -41,25 +46,13 @@ export const DURATION_LABEL: Record<string, string> = {
 export function useEscalationsPage() {
   const user = useAppStore((s) => s.user)
   const userId = user?.id ?? 0
-  const isAdmin = user?.role_code === 'system_admin'
-  // User can approve if they are system_admin OR the applicant (self-approval)
-  const canApprove = (esc: Escalation) => isAdmin || esc.user_id === userId
+  // 审批权限由后端通过权限码判断
+  const canApprove = (esc: Escalation) => esc.user_id === userId
 
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [scope, setScope] = useState<'my' | 'pending' | 'all'>('my')
   const [statusFilter, setStatusFilter] = useState('')
-
-  const [createOpen, setCreateOpen] = useState(false)
-  const [createProjectId, setCreateProjectId] = useState('')
-  const [createReason, setCreateReason] = useState('')
-
-  const [approveOpen, setApproveOpen] = useState(false)
-  const [approveTarget, setApproveTarget] = useState<Escalation | null>(null)
-  const [approveDuration, setApproveDuration] = useState<string>('7d')
-
-  const [rejectOpen, setRejectOpen] = useState(false)
-  const [rejectTarget, setRejectTarget] = useState<Escalation | null>(null)
 
   const projectsQuery = useProjects({ page: 1, pageSize: 200, needCount: false })
   const projects = projectsQuery.data?.list ?? []
@@ -76,19 +69,12 @@ export function useEscalationsPage() {
   const createMutation = useCreateEscalation()
   const approveMutation = useApproveEscalation()
   const rejectMutation = useRejectEscalation()
-
-  const handleOpenApprove = useCallback((esc: Escalation) => {
-    setApproveTarget(esc)
-    setApproveDuration('7d')
-    setApproveOpen(true)
-  }, [])
-
-  const handleOpenReject = useCallback((esc: Escalation) => {
-    setRejectTarget(esc)
-    setRejectOpen(true)
-  }, [])
+  const updateMutation = useUpdateEscalation()
+  const deleteMutation = useDeleteEscalation()
+  const batchDeleteMutation = useBatchDeleteEscalations()
 
   const handleCreateSubmit = async () => {
+    const { createProjectId, createReason } = useEscalationStore.getState()
     if (!createProjectId) {
       toast.error('请选择项目')
       return
@@ -99,19 +85,18 @@ export function useEscalationsPage() {
     }
     try {
       await createMutation.mutateAsync({
-        project_id: Number(createProjectId),
+        project_id: createProjectId,
         reason: createReason.trim(),
       })
       toast.success('提权申请已提交')
-      setCreateOpen(false)
-      setCreateProjectId('')
-      setCreateReason('')
+      useEscalationStore.getState().closeCreate()
     } catch (error) {
       toast.error(getApiErrorMessage(error, '提交失败'))
     }
   }
 
   const handleApprove = async () => {
+    const { approveTarget, approveDuration } = useEscalationStore.getState()
     if (!approveTarget) return
     try {
       await approveMutation.mutateAsync({
@@ -119,44 +104,98 @@ export function useEscalationsPage() {
         duration: approveDuration,
       })
       toast.success('已批准提权申请')
-      setApproveOpen(false)
-      setApproveTarget(null)
+      useEscalationStore.getState().closeApprove()
     } catch (error) {
       toast.error(getApiErrorMessage(error, '审批失败'))
     }
   }
 
   const handleReject = async () => {
+    const { rejectTarget } = useEscalationStore.getState()
     if (!rejectTarget) return
     try {
       await rejectMutation.mutateAsync({ id: rejectTarget.id })
       toast.success('已拒绝提权申请')
-      setRejectOpen(false)
-      setRejectTarget(null)
+      useEscalationStore.getState().closeReject()
     } catch (error) {
       toast.error(getApiErrorMessage(error, '拒绝失败'))
     }
   }
 
+  const handleOpenEdit = useCallback((esc: Escalation) => {
+    useEscalationStore.getState().openEdit(esc)
+  }, [])
+
+  const handleEditSubmit = async () => {
+    const { editTarget, editReason } = useEscalationStore.getState()
+    if (!editTarget || !editReason.trim()) {
+      toast.error('请填写提权理由')
+      return
+    }
+    try {
+      await updateMutation.mutateAsync({ id: editTarget.id, reason: editReason.trim() })
+      toast.success('提权申请已更新')
+      useEscalationStore.getState().closeEdit()
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '更新失败'))
+    }
+  }
+
+  const handleOpenApprove = useCallback((esc: Escalation) => {
+    useEscalationStore.getState().openApprove(esc)
+  }, [])
+
+  const handleOpenReject = useCallback((esc: Escalation) => {
+    useEscalationStore.getState().openReject(esc)
+  }, [])
+
+  const handleOpenDelete = useCallback((esc: Escalation) => {
+    useEscalationStore.getState().openDelete(esc)
+  }, [])
+
+  const handleDelete = async () => {
+    const { deleteAlertTarget } = useEscalationStore.getState()
+    if (!deleteAlertTarget) return
+    try {
+      await deleteMutation.mutateAsync(deleteAlertTarget.id)
+      toast.success('已删除提权申请')
+      useEscalationStore.getState().closeDelete()
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '删除失败'))
+    }
+  }
+
+  const handleBatchDelete = useCallback((rows: Escalation[]) => {
+    if (!rows.length) return
+    useEscalationStore.getState().openBatchDelete(rows)
+  }, [])
+
+  const handleBatchDeleteConfirm = async () => {
+    const { batchDeleteRows } = useEscalationStore.getState()
+    if (!batchDeleteRows.length) return
+    try {
+      await batchDeleteMutation.mutateAsync(batchDeleteRows.map((r) => r.id))
+      toast.success('提权申请删除成功')
+      useEscalationStore.getState().closeBatchDelete()
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, '批量删除失败'))
+    }
+  }
+
   return {
     userId,
-    isAdmin,
     canApprove,
     page, setPage,
     pageSize, setPageSize,
     scope, setScope,
     statusFilter, setStatusFilter,
-    createOpen, setCreateOpen,
-    createProjectId, setCreateProjectId,
-    createReason, setCreateReason,
-    approveOpen, setApproveOpen,
-    approveTarget, setApproveTarget,
-    approveDuration, setApproveDuration,
-    rejectOpen, setRejectOpen,
-    rejectTarget, setRejectTarget,
     projects, query, data, refetch,
     createMutation, approveMutation, rejectMutation,
+    updateMutation, deleteMutation, batchDeleteMutation,
     handleOpenApprove, handleOpenReject,
     handleCreateSubmit, handleApprove, handleReject,
+    handleOpenEdit, handleEditSubmit,
+    handleOpenDelete, handleDelete, handleBatchDelete,
+    handleBatchDeleteConfirm,
   }
 }

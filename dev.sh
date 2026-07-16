@@ -29,24 +29,42 @@ kill_port() {
 }
 
 # ──────────────────────────────────────────
+# 工具：等待端口监听，超时退出
+# ──────────────────────────────────────────
+wait_port() {
+  local port=$1 name=$2 timeout=${3:-30}
+  local i
+  for i in $(seq 1 $timeout); do
+    lsof -ti ":$port" 2>/dev/null && return 0
+    sleep 1
+  done
+  echo "  ERROR: $name failed to listen on port $port after ${timeout}s" >&2
+  return 1
+}
+
+# ──────────────────────────────────────────
 # 启动
 # ──────────────────────────────────────────
+
 start_server() {
   mkdir -p "$RUN_DIR"
   kill_port $SERVER_PORT server
-  [[ -f "$ROOT/server/config.yml" ]] || cp "$ROOT/server/config.example.yaml" "$ROOT/server/config.yml"
+  sleep 1
   echo "  start server (port $SERVER_PORT)..."
   cd "$ROOT/server" && go run . start -c config.yml >"$SERVER_LOG" 2>&1 &
   cd "$ROOT"
+  wait_port $SERVER_PORT server || return 1
 }
 
 start_web() {
   mkdir -p "$RUN_DIR"
   kill_port $WEB_PORT web
+  sleep 1
   [[ -d "$ROOT/web/node_modules" ]] || (cd "$ROOT/web" && pnpm install)
   echo "  start web (port $WEB_PORT)..."
   cd "$ROOT/web" && pnpm dev >"$WEB_LOG" 2>&1 &
   cd "$ROOT"
+  wait_port $WEB_PORT web || return 1
 }
 
 # ──────────────────────────────────────────
@@ -76,12 +94,14 @@ status() {
 case "${1:-start}" in
   start)
     echo "=== start all ==="
-    start_server
-    start_web
+    start_server || { echo "  server failed to start" >&2; exit 1; }
+    start_web || { echo "  web failed to start" >&2; exit 1; }
     echo ""
     echo "  web:    http://127.0.0.1:$WEB_PORT"
     echo "  api:    http://127.0.0.1:$SERVER_PORT/api/v1"
     echo "  stop:   ./dev.sh stop"
+    echo ""
+    tail -f "$SERVER_LOG" "$WEB_LOG"
     ;;
 
   stop)
@@ -94,23 +114,25 @@ case "${1:-start}" in
     echo "=== restart all ==="
     stop_web
     stop_server
-    start_server
-    start_web
+    start_server || { echo "  server failed to start, aborting" >&2; exit 1; }
+    start_web || { echo "  web failed to start, aborting" >&2; exit 1; }
     echo ""
     echo "  web:    http://127.0.0.1:$WEB_PORT"
     echo "  api:    http://127.0.0.1:$SERVER_PORT/api/v1"
+    echo ""
+    tail -f "$SERVER_LOG" "$WEB_LOG"
     ;;
 
   web)
     echo "=== restart web ==="
     stop_web
-    start_web
+    start_web || { echo "  web failed to start" >&2; exit 1; }
     ;;
 
   server)
     echo "=== restart server ==="
     stop_server
-    start_server
+    start_server || { echo "  server failed to start" >&2; exit 1; }
     ;;
 
   status)
@@ -119,6 +141,7 @@ case "${1:-start}" in
     ;;
 
   logs)
+    [[ -f "$SERVER_LOG" && -f "$WEB_LOG" ]] || { echo "  no log files found, run ./dev.sh start first" >&2; exit 1; }
     tail -f "$SERVER_LOG" "$WEB_LOG"
     ;;
 

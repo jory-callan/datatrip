@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"czwlinux.cloud/go-friday-starter/global"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
+	"czwlinux.cloud/go-friday-starter/pkg/queryfilter"
 	"go.uber.org/zap"
 )
 
@@ -17,52 +19,51 @@ func Save(ctx context.Context, r *DatasourceRule) error {
 	return global.DB.WithContext(ctx).Save(r).Error
 }
 
-func GetByID(ctx context.Context, id uint) (*DatasourceRule, error) {
+func GetByID(ctx context.Context, id string) (*DatasourceRule, error) {
 	var r DatasourceRule
-	if err := global.DB.WithContext(ctx).First(&r, id).Error; err != nil {
+	if err := global.DB.WithContext(ctx).Where("id = ?", id).First(&r).Error; err != nil {
 		return nil, err
 	}
 	return &r, nil
 }
 
-func List(ctx context.Context, query ListQuery) ([]DatasourceRule, int64, error) {
+func List(ctx context.Context, pq response.PageQuery, filters map[string]string) ([]DatasourceRule, int64, error) {
 	var items []DatasourceRule
-	var total int64
 	db := global.DB.WithContext(ctx).Model(&DatasourceRule{})
 
-	dbType := strings.TrimSpace(query.DBType)
-	if dbType != "" {
-		db = db.Where("db_type = ?", dbType)
-	}
-	category := strings.TrimSpace(query.Category)
-	if category != "" {
-		db = db.Where("category = ?", category)
-	}
-	if query.Enabled == "true" {
+	// 通用 filter（type_group, type_scope, category）
+	db = queryfilter.ApplyAll(db, filters, map[string]string{
+		"type_group": "type_group",
+		"type_scope": "type_scope",
+		"category":   "category",
+	})
+
+	// enabled — 特殊布尔处理
+	if enabled := strings.TrimSpace(filters["enabled"]); enabled == "true" || enabled == "=true" {
 		db = db.Where("enabled = ?", true)
-	} else if query.Enabled == "false" {
+	} else if enabled == "false" || enabled == "=false" {
 		db = db.Where("enabled = ?", false)
 	}
 
-	if query.NeedCount {
-		if err := db.Count(&total).Error; err != nil {
-			return nil, 0, err
-		}
-	}
-	if err := db.Order("id desc").Offset(query.Offset()).Limit(query.PageSize).Find(&items).Error; err != nil {
+	total, err := queryfilter.Paginate(db.Order("priority asc, id desc"), pq.Page, pq.PageSize, pq.NeedCount, &items)
+	if err != nil {
 		return nil, 0, err
-	}
-	if !query.NeedCount {
-		total = int64(len(items))
 	}
 	return items, total, nil
 }
 
-func DeleteByID(ctx context.Context, id uint) error {
-	return global.DB.WithContext(ctx).Delete(&DatasourceRule{}, id).Error
+func DeleteByID(ctx context.Context, id string) error {
+	return global.DB.WithContext(ctx).Where("id = ?", id).Delete(&DatasourceRule{}).Error
 }
 
-// GetRulesByIDs returns enabled rules matching the given IDs.
+func DeleteByIDs(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return global.DB.WithContext(ctx).Delete(&DatasourceRule{}, ids).Error
+}
+
+// GetRulesByIDs 根据 ID 列表返回启用的规则
 func GetRulesByIDs(ctx context.Context, ids []uint) ([]DatasourceRule, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -70,28 +71,28 @@ func GetRulesByIDs(ctx context.Context, ids []uint) ([]DatasourceRule, error) {
 	var rules []DatasourceRule
 	if err := global.DB.WithContext(ctx).
 		Where("id IN ? AND enabled = ?", ids, true).
+		Order("priority asc").
 		Find(&rules).Error; err != nil {
 		return nil, err
 	}
 	return rules, nil
 }
 
-// GetEnabledRulesByDBType returns all enabled rules matching the given db_type.
-// Matches exact db_type or 'all' wildcard.
-func GetEnabledRulesByDBType(ctx context.Context, dbType string) ([]DatasourceRule, error) {
-	if dbType == "" {
-		return nil, nil
-	}
+// GetEnabledRulesByTypeScope 返回启用且匹配 type_group/type_scope 的规则。
+func GetEnabledRulesByTypeScope(ctx context.Context, dsType, dsGroup string) ([]DatasourceRule, error) {
 	var rules []DatasourceRule
-	if err := global.DB.WithContext(ctx).
-		Where("enabled = ? AND (db_type = ? OR db_type = 'all')", true, dbType).
-		Find(&rules).Error; err != nil {
+	db := global.DB.WithContext(ctx).
+		Model(&DatasourceRule{}).
+		Where("enabled = ?", true)
+	db = db.Where("(type_group = ? OR type_group = \"\") AND (type_scope = ? OR type_scope = \"\")",
+		dsGroup, dsType)
+	if err := db.Order("priority asc").Find(&rules).Error; err != nil {
 		return nil, err
 	}
 	return rules, nil
 }
 
-// MatchRule checks if a SQL statement matches a DatasourceRule's pattern.
+// MatchRule 检查 SQL 语句是否匹配规则的正则模式
 func MatchRule(rule *DatasourceRule, sqlStmt string) bool {
 	re, err := regexp.Compile(rule.Pattern)
 	if err != nil {

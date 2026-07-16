@@ -4,31 +4,25 @@ import "github.com/labstack/echo/v4"
 
 const CurrentUserIDKey = "user_id"
 
-func SetUserID(c echo.Context, userID uint) {
+func SetUserID(c echo.Context, userID string) {
 	if c == nil {
 		return
 	}
 	c.Set(CurrentUserIDKey, userID)
 }
 
-func CurrentUserID(c echo.Context) (uint, bool) {
+func CurrentUserID(c echo.Context) (string, bool) {
 	if c == nil {
-		return 0, false
+		return "", false
 	}
 	v := c.Get(CurrentUserIDKey)
 	switch id := v.(type) {
-	case uint:
-		return id, id > 0
-	case uint64:
-		if id > 0 {
-			return uint(id), true
-		}
-	case int:
-		if id > 0 {
-			return uint(id), true
+	case string:
+		if id != "" {
+			return id, true
 		}
 	}
-	return 0, false
+	return "", false
 }
 
 // RequireAuth returns an Echo middleware that rejects unauthenticated requests.

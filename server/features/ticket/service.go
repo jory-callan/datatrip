@@ -2,32 +2,37 @@ package ticket
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
 	"czwlinux.cloud/go-friday-starter/features/audit"
+	"czwlinux.cloud/go-friday-starter/features/auth"
 	"czwlinux.cloud/go-friday-starter/features/project"
-	"czwlinux.cloud/go-friday-starter/features/user"
 	"czwlinux.cloud/go-friday-starter/features/webhook"
 	"czwlinux.cloud/go-friday-starter/global"
 	"czwlinux.cloud/go-friday-starter/pkg/dbpool"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
+	"czwlinux.cloud/go-friday-starter/pkg/pipeline"
+	"github.com/elastic/go-elasticsearch/v8"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
 var (
-	ErrNotFound       = errors.New("ticket not found")
-	ErrInvalidInput   = errors.New("invalid input")
-	ErrForbidden      = errors.New("forbidden")
+	ErrNotFound        = errors.New("ticket not found")
+	ErrInvalidInput    = errors.New("invalid input")
+	ErrForbidden       = errors.New("forbidden")
 	ErrAlreadyActioned = errors.New("ticket already actioned")
 )
 
 // CreateTicket creates a new pending ticket.
-func CreateTicket(ctx context.Context, projectID, applicantID uint, title, description, sqlSnapshot, approvalMode string) (*DTO, error) {
-	if projectID == 0 || applicantID == 0 || sqlSnapshot == "" {
+func CreateTicket(ctx context.Context, projectID, applicantID string, title, description, instructionJSON, approvalMode string) (*DTO, error) {
+	if projectID == "" || applicantID == "" || instructionJSON == "" {
 		return nil, ErrInvalidInput
 	}
 	if approvalMode == "" {
@@ -37,30 +42,20 @@ func CreateTicket(ctx context.Context, projectID, applicantID uint, title, descr
 		return nil, ErrInvalidInput
 	}
 
-	// If project has auto_match_approver, sync approver_ids from project_owner members
-	proj, err := project.GetByID(ctx, projectID)
+	// Verify project exists
+	_, err := project.GetByID(ctx, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("project not found: %w", err)
 	}
-	if proj.AutoMatchApprover {
-		ownerIDs, err := project.GetProjectOwnerIDs(ctx, projectID)
-		if err != nil {
-			return nil, fmt.Errorf("get project owners failed: %w", err)
-		}
-		proj.ApproverIDs = project.JoinIDs(ownerIDs)
-		if err := project.Save(ctx, proj); err != nil {
-			return nil, fmt.Errorf("save project approvers failed: %w", err)
-		}
-	}
 
 	t := &Ticket{
-		ProjectID:    projectID,
-		ApplicantID:  applicantID,
-		Title:        title,
-		Description:  description,
-		SqlSnapshot:  sqlSnapshot,
-		Status:       StatusPending,
-		ApprovalMode: approvalMode,
+		ProjectID:       projectID,
+		ApplicantID:     applicantID,
+		Title:           title,
+		Description:     description,
+		InstructionJSON: instructionJSON,
+		Status:          StatusPending,
+		ApprovalMode:    approvalMode,
 	}
 	if err := Create(ctx, t); err != nil {
 		return nil, err
@@ -68,19 +63,19 @@ func CreateTicket(ctx context.Context, projectID, applicantID uint, title, descr
 
 	// Send webhook for ticket.created
 	webhook.SendWebhook(ctx, "ticket.created", map[string]interface{}{
-		"ticket_id": t.ID,
-		"project_id": projectID,
+		"ticket_id":    t.ID,
+		"project_id":   projectID,
 		"applicant_id": applicantID,
-		"status": t.Status,
+		"status":       t.Status,
 	})
 
 	return ToDTO(t), nil
 }
 
 // ApproveTicket approves a ticket. Checks approval mode and auto-executes if condition met.
-// project_owner can bypass approver list.
-func ApproveTicket(ctx context.Context, ticketID, approverID uint, comment string) (*DTO, error) {
-	if ticketID == 0 || approverID == 0 {
+// Members with admin or approver role can approve. System admins can also approve.
+func ApproveTicket(ctx context.Context, ticketID, approverID string, comment string) (*DTO, error) {
+	if ticketID == "" || approverID == "" {
 		return nil, ErrInvalidInput
 	}
 
@@ -107,24 +102,12 @@ func ApproveTicket(ctx context.Context, ticketID, approverID uint, comment strin
 		}
 	}
 
-	// Check if user can approve: must be project_owner or approver or system_admin
-	userRole := project.GetUserProjectRole(ctx, t.ProjectID, approverID)
-	isProjectOwner := userRole == project.MemberRoleProjectOwner
-	isSystemAdmin := false
-
-	u, err := user.GetByID(ctx, approverID)
-	if err == nil {
-		isSystemAdmin = u.IsSystemAdmin()
-	}
-
-	// Check if user is in project's approver list
-	proj, err := project.GetByID(ctx, t.ProjectID)
+	// Check if user can approve: must be admin/approver in project or system_admin
+	approverIDs, err := project.GetProjectApproverIDs(ctx, t.ProjectID)
 	if err != nil {
-		return nil, fmt.Errorf("project not found: %w", err)
+		return nil, fmt.Errorf("get approvers failed: %w", err)
 	}
 
-	// Parse approver IDs from project
-	approverIDs := parseApproverIDs(proj.ApproverIDs)
 	isApprover := false
 	for _, id := range approverIDs {
 		if id == approverID {
@@ -133,7 +116,13 @@ func ApproveTicket(ctx context.Context, ticketID, approverID uint, comment strin
 		}
 	}
 
-	if !isApprover && !isProjectOwner && !isSystemAdmin {
+	isSysAdmin := false
+	codes, codeErr := auth.GetUserPermissionCodes(ctx, approverID)
+	if codeErr == nil {
+		isSysAdmin = auth.HasPermission(codes, "*")
+	}
+
+	if !isApprover && !isSysAdmin {
 		return nil, ErrForbidden
 	}
 
@@ -152,52 +141,52 @@ func ApproveTicket(ctx context.Context, ticketID, approverID uint, comment strin
 	shouldExecute := false
 
 	if t.ApprovalMode == project.ApprovalModeAnyOne {
-			// First approval auto-executes
+		// First approval auto-executes
+		shouldExecute = true
+	} else {
+		// all mode: check if all approvers have approved
+		approvedCount, err := CountApprovedRecords(ctx, ticketID)
+		if err != nil {
+			return nil, err
+		}
+		if int(approvedCount) >= len(approverIDs) {
 			shouldExecute = true
-		} else {
-			// all mode: check if all approvers have approved
-			approvedCount, err := CountApprovedRecords(ctx, ticketID)
-			if err != nil {
-				return nil, err
-			}
-			if int(approvedCount) >= len(approverIDs) {
-				shouldExecute = true
-			}
+		}
+	}
+
+	if shouldExecute {
+		t.Status = StatusApproved
+		if err := SaveTicket(ctx, t); err != nil {
+			return nil, err
 		}
 
-		if shouldExecute {
-			t.Status = StatusApproved
-			if err := SaveTicket(ctx, t); err != nil {
-				return nil, err
-			}
+		webhook.SendWebhook(ctx, "ticket.approved", map[string]interface{}{
+			"ticket_id":   t.ID,
+			"project_id":  t.ProjectID,
+			"approver_id": approverID,
+			"status":      t.Status,
+		})
 
-			webhook.SendWebhook(ctx, "ticket.approved", map[string]interface{}{
-				"ticket_id": t.ID,
-				"project_id": t.ProjectID,
-				"approver_id": approverID,
-				"status": t.Status,
-			})
-
-			// Auto-execute
-			if err := ExecuteTicket(ctx, ticketID); err != nil {
-				global.Log.Error("auto-execute ticket failed", zap.Uint("ticket_id", ticketID), zap.Error(err))
-			}
-		} else {
-			// all mode: not all approvers yet — keep as pending
-			webhook.SendWebhook(ctx, "ticket.partially_approved", map[string]interface{}{
-				"ticket_id": t.ID,
-				"project_id": t.ProjectID,
-				"approver_id": approverID,
-				"status": t.Status,
-			})
+		// Auto-execute
+		if err := ExecuteTicket(ctx, ticketID); err != nil {
+			global.Log.Error("auto-execute ticket failed", zap.String("ticket_id", ticketID), zap.Error(err))
 		}
+	} else {
+		// all mode: not all approvers yet — keep as pending
+		webhook.SendWebhook(ctx, "ticket.partially_approved", map[string]interface{}{
+			"ticket_id":   t.ID,
+			"project_id":  t.ProjectID,
+			"approver_id": approverID,
+			"status":      t.Status,
+		})
+	}
 
 	return ToDTO(t), nil
 }
 
 // RejectTicket rejects a ticket.
-func RejectTicket(ctx context.Context, ticketID, approverID uint, comment string) (*DTO, error) {
-	if ticketID == 0 || approverID == 0 {
+func RejectTicket(ctx context.Context, ticketID, approverID string, comment string) (*DTO, error) {
+	if ticketID == "" || approverID == "" {
 		return nil, ErrInvalidInput
 	}
 
@@ -214,20 +203,11 @@ func RejectTicket(ctx context.Context, ticketID, approverID uint, comment string
 	}
 
 	// Check if user can approve (same permission as approving)
-	userRole := project.GetUserProjectRole(ctx, t.ProjectID, approverID)
-	isProjectOwner := userRole == project.MemberRoleProjectOwner
-	isSystemAdmin := false
-	u, err := user.GetByID(ctx, approverID)
-	if err == nil {
-		isSystemAdmin = u.IsSystemAdmin()
-	}
-
-	proj, err := project.GetByID(ctx, t.ProjectID)
+	approverIDs, err := project.GetProjectApproverIDs(ctx, t.ProjectID)
 	if err != nil {
-		return nil, fmt.Errorf("project not found: %w", err)
+		return nil, fmt.Errorf("get approvers failed: %w", err)
 	}
 
-	approverIDs := parseApproverIDs(proj.ApproverIDs)
 	isApprover := false
 	for _, id := range approverIDs {
 		if id == approverID {
@@ -236,7 +216,13 @@ func RejectTicket(ctx context.Context, ticketID, approverID uint, comment string
 		}
 	}
 
-	if !isApprover && !isProjectOwner && !isSystemAdmin {
+	isSysAdmin := false
+	codes, codeErr := auth.GetUserPermissionCodes(ctx, approverID)
+	if codeErr == nil {
+		isSysAdmin = auth.HasPermission(codes, "*")
+	}
+
+	if !isApprover && !isSysAdmin {
 		return nil, ErrForbidden
 	}
 
@@ -256,17 +242,17 @@ func RejectTicket(ctx context.Context, ticketID, approverID uint, comment string
 	}
 
 	webhook.SendWebhook(ctx, "ticket.rejected", map[string]interface{}{
-		"ticket_id": t.ID,
-		"project_id": t.ProjectID,
+		"ticket_id":   t.ID,
+		"project_id":  t.ProjectID,
 		"approver_id": approverID,
-		"status": t.Status,
+		"status":      t.Status,
 	})
 
 	return ToDTO(t), nil
 }
 
-// ExecuteTicket executes the SQL snapshot against the datasource.
-func ExecuteTicket(ctx context.Context, ticketID uint) error {
+// ExecuteTicket executes the instructions against the project's datasource.
+func ExecuteTicket(ctx context.Context, ticketID string) error {
 	t, err := GetTicketByID(ctx, ticketID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return ErrNotFound
@@ -279,10 +265,18 @@ func ExecuteTicket(ctx context.Context, ticketID uint) error {
 		return ErrAlreadyActioned
 	}
 
-	// Get project
 	proj, err := project.GetByID(ctx, t.ProjectID)
 	if err != nil {
 		return fmt.Errorf("project not found: %w", err)
+	}
+
+	// Unmarshal instructions
+	var insts []pipeline.Instruction
+	if err := json.Unmarshal([]byte(t.InstructionJSON), &insts); err != nil {
+		return fmt.Errorf("unmarshal instructions failed: %w", err)
+	}
+	if len(insts) == 0 {
+		return fmt.Errorf("no instructions to execute")
 	}
 
 	t.Status = StatusExecuting
@@ -291,50 +285,108 @@ func ExecuteTicket(ctx context.Context, ticketID uint) error {
 	}
 
 	start := time.Now()
-
-	// Get db connection
-	pool, err := dbpool.Get(ctx, proj.DatasourceID)
-	if err != nil {
-		t.Status = StatusExecuteFailed
-		_ = SaveTicket(ctx, t)
-
-		// Audit log for failure
-		audit.CreateAuditLog(ctx, audit.CreateAuditLogRequest{
-			ActorID:       t.ApplicantID,
-			ProjectID:     t.ProjectID,
-			DatasourceID:  proj.DatasourceID,
-			Action:        "ticket_execute",
-			Sql:           t.SqlSnapshot,
-			Classification: "write",
-			Status:        audit.StatusFailed,
-			ErrorMessage:  fmt.Sprintf("get db connection failed: %v", err),
-			TicketID:      t.ID,
-		})
-
-		webhook.SendWebhook(ctx, "ticket.execution_failed", map[string]interface{}{
-			"ticket_id": t.ID,
-			"project_id": t.ProjectID,
-			"error": err.Error(),
-		})
-
-		return fmt.Errorf("get db connection failed: %w", err)
-	}
-
-	// Execute SQL (multi-statement)
-	statements := splitSQL(t.SqlSnapshot)
 	execErrStr := ""
-	for i, stmt := range statements {
-		if strings.TrimSpace(stmt) == "" {
-			continue
+
+	// Determine execution path based on instruction type group
+	switch insts[0].TypeGroup {
+	case "sql":
+		pool, err := dbpool.Get(ctx, proj.DatasourceID)
+		if err != nil {
+			t.Status = StatusExecuteFailed
+			_ = SaveTicket(ctx, t)
+			writeTicketAuditLog(ctx, t, proj, audit.StatusFailed, fmt.Sprintf("get db connection failed: %v", err), 0, t.InstructionJSON)
+			sendTicketWebhook(ctx, t, "ticket.execution_failed", err.Error())
+			return fmt.Errorf("get db connection failed: %w", err)
 		}
-		_, execErr := pool.ExecContext(ctx, stmt)
-		if execErr != nil {
-			if i == 0 {
-				execErrStr = execErr.Error()
-			} else {
-				execErrStr += "; " + execErr.Error()
+		for _, inst := range insts {
+			stmt := inst.Raw
+			_, execErr := pool.ExecContext(ctx, stmt)
+			if execErr != nil {
+				if execErrStr == "" {
+					execErrStr = execErr.Error()
+				} else {
+					execErrStr += "; " + execErr.Error()
+				}
 			}
 		}
+
+	case "nosql":
+		switch insts[0].Type {
+		case "redis":
+			client, err := dbpool.GetRedis(ctx, proj.DatasourceID)
+			if err != nil {
+				t.Status = StatusExecuteFailed
+				_ = SaveTicket(ctx, t)
+				writeTicketAuditLog(ctx, t, proj, audit.StatusFailed, fmt.Sprintf("get redis connection failed: %v", err), 0, t.InstructionJSON)
+				sendTicketWebhook(ctx, t, "ticket.execution_failed", err.Error())
+				return fmt.Errorf("get redis connection failed: %w", err)
+			}
+			for _, inst := range insts {
+				args := make([]any, 0, len(inst.Args)+1)
+				args = append(args, inst.Command)
+				for _, a := range inst.Args {
+					args = append(args, a)
+				}
+				if err := client.Do(ctx, args...).Err(); err != nil {
+					if execErrStr == "" {
+						execErrStr = err.Error()
+					} else {
+						execErrStr += "; " + err.Error()
+					}
+				}
+			}
+		case "mongo":
+			client, err := dbpool.GetMongo(ctx, proj.DatasourceID)
+			if err != nil {
+				t.Status = StatusExecuteFailed
+				_ = SaveTicket(ctx, t)
+				writeTicketAuditLog(ctx, t, proj, audit.StatusFailed, fmt.Sprintf("get mongo connection failed: %v", err), 0, t.InstructionJSON)
+				sendTicketWebhook(ctx, t, "ticket.execution_failed", err.Error())
+				return fmt.Errorf("get mongo connection failed: %w", err)
+			}
+			for _, inst := range insts {
+				dbName := "admin"
+				if proj.Scope != "" {
+					dbName = proj.Scope
+				}
+				if err := client.Database(dbName).RunCommand(ctx, []byte(inst.Raw)).Err(); err != nil {
+					if execErrStr == "" {
+						execErrStr = err.Error()
+					} else {
+						execErrStr += "; " + err.Error()
+					}
+				}
+			}
+		default:
+			return fmt.Errorf("unsupported nosql type for ticket execution: %s", insts[0].Type)
+		}
+
+	case "search":
+		switch insts[0].Type {
+		case "es":
+			client, err := dbpool.GetES(ctx, proj.DatasourceID)
+			if err != nil {
+				t.Status = StatusExecuteFailed
+				_ = SaveTicket(ctx, t)
+				writeTicketAuditLog(ctx, t, proj, audit.StatusFailed, fmt.Sprintf("get es connection failed: %v", err), 0, t.InstructionJSON)
+				sendTicketWebhook(ctx, t, "ticket.execution_failed", err.Error())
+				return fmt.Errorf("get es connection failed: %w", err)
+			}
+			for _, inst := range insts {
+				if err := executeESWrite(ctx, client, inst); err != nil {
+					if execErrStr == "" {
+						execErrStr = err.Error()
+					} else {
+						execErrStr += "; " + err.Error()
+					}
+				}
+			}
+		default:
+			return fmt.Errorf("unsupported search type for ticket execution: %s", insts[0].Type)
+		}
+
+	default:
+		return fmt.Errorf("unsupported type group for ticket execution: %s", insts[0].TypeGroup)
 	}
 
 	duration := int(time.Since(start).Milliseconds())
@@ -346,26 +398,8 @@ func ExecuteTicket(ctx context.Context, ticketID uint) error {
 		now := time.Now()
 		t.ExecutedAt = &now
 		_ = SaveTicket(ctx, t)
-
-		audit.CreateAuditLog(ctx, audit.CreateAuditLogRequest{
-			ActorID:       t.ApplicantID,
-			ProjectID:     t.ProjectID,
-			DatasourceID:  proj.DatasourceID,
-			Action:        "ticket_execute",
-			Sql:           t.SqlSnapshot,
-			Classification: "write",
-			Status:        audit.StatusFailed,
-			ErrorMessage:  execErrStr,
-			DurationMs:    duration,
-			TicketID:      t.ID,
-		})
-
-		webhook.SendWebhook(ctx, "ticket.execution_failed", map[string]interface{}{
-			"ticket_id": t.ID,
-			"project_id": t.ProjectID,
-			"error": execErrStr,
-		})
-
+		writeTicketAuditLog(ctx, t, proj, audit.StatusFailed, execErrStr, duration, t.InstructionJSON)
+		sendTicketWebhook(ctx, t, "ticket.execution_failed", execErrStr)
 		return fmt.Errorf("execution failed: %s", execErrStr)
 	}
 
@@ -376,31 +410,41 @@ func ExecuteTicket(ctx context.Context, ticketID uint) error {
 	if err := SaveTicket(ctx, t); err != nil {
 		return err
 	}
-
-	audit.CreateAuditLog(ctx, audit.CreateAuditLogRequest{
-		ActorID:       t.ApplicantID,
-		ProjectID:     t.ProjectID,
-		DatasourceID:  proj.DatasourceID,
-		Action:        "ticket_execute",
-		Sql:           t.SqlSnapshot,
-		Classification: "write",
-		Status:        audit.StatusSuccess,
-		DurationMs:    duration,
-		TicketID:      t.ID,
-	})
-
-	webhook.SendWebhook(ctx, "ticket.executed", map[string]interface{}{
-		"ticket_id": t.ID,
-		"project_id": t.ProjectID,
-		"status": t.Status,
-		"duration_ms": duration,
-	})
-
+	writeTicketAuditLog(ctx, t, proj, audit.StatusSuccess, "", duration, t.InstructionJSON)
+	sendTicketWebhook(ctx, t, "ticket.executed", "")
 	return nil
 }
 
+func writeTicketAuditLog(ctx context.Context, t *Ticket, proj *project.DataProject, status, errMsg string, durationMs int, instructionJSON string) {
+	audit.CreateAuditLog(ctx, audit.CreateAuditLogRequest{
+		ActorID:         t.ApplicantID,
+		ProjectID:       t.ProjectID,
+		DatasourceID:    proj.DatasourceID,
+		Action:          "ticket_execute",
+		RawText:         instructionJSON,
+		InstructionJSON: instructionJSON,
+		Classification:  "write",
+		Status:          status,
+		ErrorMessage:    errMsg,
+		DurationMs:      durationMs,
+		TicketID:        t.ID,
+	})
+}
+
+func sendTicketWebhook(ctx context.Context, t *Ticket, event, errMsg string) {
+	payload := map[string]interface{}{
+		"ticket_id":  t.ID,
+		"project_id": t.ProjectID,
+		"status":     t.Status,
+	}
+	if errMsg != "" {
+		payload["error"] = errMsg
+	}
+	webhook.SendWebhook(ctx, event, payload)
+}
+
 // GetTicketDetail returns ticket + approvals + related audit logs.
-func GetTicketDetail(ctx context.Context, ticketID uint) (*TicketDetail, error) {
+func GetTicketDetail(ctx context.Context, ticketID string) (*TicketDetail, error) {
 	t, err := GetTicketByID(ctx, ticketID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrNotFound
@@ -433,12 +477,12 @@ func GetTicketDetail(ctx context.Context, ticketID uint) (*TicketDetail, error) 
 }
 
 // ListTicketsForUser lists tickets based on scope.
-func ListTicketsForUser(ctx context.Context, userID uint, query ListQuery) ([]*DTO, int64, error) {
-	query.Normalize()
+func ListTicketsForUser(ctx context.Context, userID string, pq response.PageQuery, filters map[string]string) ([]*DTO, int64, error) {
+	scope := filters["scope"]
 
-	switch query.Scope {
+	switch scope {
 	case "my":
-		items, total, err := ListTicketsByApplicant(ctx, userID, query)
+		items, total, err := ListTicketsByApplicant(ctx, userID, pq, filters)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -449,9 +493,8 @@ func ListTicketsForUser(ctx context.Context, userID uint, query ListQuery) ([]*D
 		return result, total, nil
 	case "pending":
 		// Pending tickets where user is an approver
-		// Get all projects where user is a member with approver access
-		query.Status = StatusPending
-		items, total, err := ListTickets(ctx, query)
+		filters["status"] = "=pending"
+		items, total, err := ListTickets(ctx, pq, filters)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -461,7 +504,7 @@ func ListTicketsForUser(ctx context.Context, userID uint, query ListQuery) ([]*D
 		}
 		return result, total, nil
 	default:
-		items, total, err := ListTickets(ctx, query)
+		items, total, err := ListTickets(ctx, pq, filters)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -473,31 +516,10 @@ func ListTicketsForUser(ctx context.Context, userID uint, query ListQuery) ([]*D
 	}
 }
 
-// Helper: parse comma-separated approver IDs
-func parseApproverIDs(s string) []uint {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	var ids []uint
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		id, err := strconv.ParseUint(p, 10, 64)
-		if err != nil {
-			continue
-		}
-		ids = append(ids, uint(id))
-	}
-	return ids
-}
-
 // UrgeTicket creates an urge record for a pending ticket.
 // Only the applicant can urge. Minimum interval: 30 minutes.
-func UrgeTicket(ctx context.Context, ticketID, userID uint) (*DTO, error) {
-	if ticketID == 0 || userID == 0 {
+func UrgeTicket(ctx context.Context, ticketID, userID string) (*DTO, error) {
+	if ticketID == "" || userID == "" {
 		return nil, ErrInvalidInput
 	}
 
@@ -539,18 +561,19 @@ func UrgeTicket(ctx context.Context, ticketID, userID uint) (*DTO, error) {
 
 	// Send webhook for ticket.urged
 	webhook.SendWebhook(ctx, "ticket.urged", map[string]interface{}{
-		"ticket_id":   t.ID,
-		"project_id":  t.ProjectID,
+		"ticket_id":    t.ID,
+		"project_id":   t.ProjectID,
 		"applicant_id": t.ApplicantID,
-		"status":      t.Status,
+		"status":       t.Status,
 	})
 
 	return ToDTO(t), nil
 }
+
 // ResubmitTicket creates a new ticket from a rejected one.
 // The original ticket stays rejected. The new ticket inherits project, approval mode, approver config.
-func ResubmitTicket(ctx context.Context, originalTicketID, userID uint, title, description, sqlSnapshot string) (*DTO, error) {
-	if originalTicketID == 0 || userID == 0 || sqlSnapshot == "" {
+func ResubmitTicket(ctx context.Context, originalTicketID, userID string, title, description, instructionJSON string) (*DTO, error) {
+	if originalTicketID == "" || userID == "" || instructionJSON == "" {
 		return nil, ErrInvalidInput
 	}
 
@@ -579,13 +602,13 @@ func ResubmitTicket(ctx context.Context, originalTicketID, userID uint, title, d
 
 	// Create new ticket inheriting from original
 	t := &Ticket{
-		ProjectID:    original.ProjectID,
-		ApplicantID:  userID,
-		Title:        title,
-		Description:  description,
-		SqlSnapshot:  sqlSnapshot,
-		Status:       StatusPending,
-		ApprovalMode: original.ApprovalMode,
+		ProjectID:       original.ProjectID,
+		ApplicantID:     userID,
+		Title:           title,
+		Description:     description,
+		InstructionJSON: instructionJSON,
+		Status:          StatusPending,
+		ApprovalMode:    original.ApprovalMode,
 	}
 	if err := Create(ctx, t); err != nil {
 		return nil, err
@@ -593,14 +616,53 @@ func ResubmitTicket(ctx context.Context, originalTicketID, userID uint, title, d
 
 	// Send webhook for ticket.created
 	webhook.SendWebhook(ctx, "ticket.created", map[string]interface{}{
-		"ticket_id":    t.ID,
-		"project_id":   t.ProjectID,
-		"applicant_id": t.ApplicantID,
-		"status":       t.Status,
+		"ticket_id":        t.ID,
+		"project_id":       t.ProjectID,
+		"applicant_id":     t.ApplicantID,
+		"status":           t.Status,
 		"resubmitted_from": originalTicketID,
 	})
 
 	return ToDTO(t), nil
+}
+
+// executeESWrite 执行 ES 写操作（在工单审批后调用）
+func executeESWrite(ctx context.Context, client *elasticsearch.Client, inst pipeline.Instruction) error {
+	parts := strings.Fields(inst.Raw)
+	if len(parts) < 2 {
+		return fmt.Errorf("invalid es command: %s", inst.Raw)
+	}
+	method := strings.ToUpper(parts[0])
+	path := parts[1]
+
+	var body io.Reader
+	if len(parts) > 2 {
+		idx := strings.Index(inst.Raw, " ")
+		secondSpace := strings.Index(inst.Raw[idx+1:], " ")
+		if secondSpace > 0 {
+			body = strings.NewReader(inst.Raw[idx+1+secondSpace+1:])
+		}
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, path, body)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := client.Transport.Perform(req)
+	if err != nil {
+		return fmt.Errorf("es request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("es error HTTP %d: %s", resp.StatusCode, string(b))
+	}
+	return nil
 }
 
 func splitSQL(sql string) []string {

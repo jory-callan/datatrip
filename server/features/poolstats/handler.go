@@ -1,8 +1,6 @@
 package poolstats
 
 import (
-	"strconv"
-
 	"czwlinux.cloud/go-friday-starter/pkg/dbpool"
 	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
 	"github.com/labstack/echo/v4"
@@ -15,16 +13,11 @@ func NewHandler() *Handler {
 }
 
 func (h *Handler) Get(c echo.Context) error {
-	idStr := c.Param("id")
-	if idStr != "" {
-		id, err := strconv.ParseUint(idStr, 10, 64)
-		if err != nil || id == 0 {
-			return response.BadRequest(c, "invalid id")
-		}
-		stats := dbpool.GetPoolStats(uint(id))
+	id := c.Param("id")
+	if id != "" {
+		stats := dbpool.GetPoolStats(id)
 		return response.Ok(c, stats)
 	}
-	// List all
 	stats := dbpool.ListAllPoolStats()
 	return response.Ok(c, stats)
 }

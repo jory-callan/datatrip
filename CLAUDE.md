@@ -6,24 +6,10 @@
 
 ## 项目简介
 
-**Jerry DB Manager** — 企业统一数据库管理平台。MySQL / PostgreSQL 数据源接入、SQL 工作台、写操作工单审批流、操作审计与 Webhook 通知。
-
-```bash
-./dev.sh start    # 启动后端(8080) + 前端(5173)
-./dev.sh stop     # 停止全部
-```
-
-| 层 | 选型 |
-| --- | --- |
-| 后端 | Go + Echo + GORM |
-| 前端 | React 19 + TypeScript + Vite + pnpm |
-| 样式 | TailwindCSS 4 + shadcn/ui |
-| 元数据库 | SQLite（开发）|
-| 被管理库 | MySQL / PostgreSQL |
-
-### 页面
-
-`/login` `/dashboard` `/users` `/datasources` `/projects` `/sql-workbench` `/tickets` `/audits` `/webhooks` `/datasource-rules`
+**Jerry DB Manager** — 企业统一数据管理平台。
+产品定位：  Data Ops Platform（数据运维平台） — 不是又一个数据库管理工具，而是统一的数据操作网关 +
+  审批治理层。核心价值是"所有数据操作经过审批、有审计、可追溯"，不是替代数据库自身的权限体系。
+包括 标准sql， nosql, MQ等各种数据源对接。
 
 ---
 
@@ -108,3 +94,6 @@ server/CONVENTIONS.md  → 改后端前读
 web/CONVENTIONS.md     → 改前端前读
 docs/                  → 深度参考（permission / sql-execution / database-extension）
 ```
+
+### 必做动作
+docs/api 是api约定文件夹，里面包含了前后端协作的api约定以及接口逻辑。用户需要排查错误优先查看此文件夹，新功能完成需要及时维护此文件夹

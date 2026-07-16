@@ -3,15 +3,15 @@ package stats
 import "time"
 
 type DashboardStats struct {
-	ProjectCount   int64              `json:"project_count"`
-	DatasourceCount int64             `json:"datasource_count"`
-	TodayExecCount  int64             `json:"today_exec_count"`
-	PendingTicketCount int64          `json:"pending_ticket_count"`
-	RecentExecutions []RecentExecution `json:"recent_executions"`
+	ProjectCount       int64             `json:"project_count"`
+	DatasourceCount    int64             `json:"datasource_count"`
+	TodayExecCount     int64             `json:"today_exec_count"`
+	PendingTicketCount int64             `json:"pending_ticket_count"`
+	RecentExecutions   []RecentExecution `json:"recent_executions"`
 }
 
 type RecentExecution struct {
-	ID             uint      `json:"id"`
+	ID             string    `json:"id"`
 	ProjectID      uint      `json:"project_id"`
 	ProjectName    string    `json:"project_name"`
 	Sql            string    `json:"sql"`

@@ -2,29 +2,21 @@ package datasource
 
 import (
 	"time"
-
-	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
 )
 
 type DTO struct {
-	ID           uint      `json:"id"`
-	Name         string    `json:"name"`
-	Type         string    `json:"type"`
-	Host         string    `json:"host"`
-	Port         int       `json:"port"`
-	Username     string    `json:"username"`
-	PasswordSaved bool     `json:"password_saved"`
-	Remark       string    `json:"remark"`
-	Status       string    `json:"status"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-}
-
-type ListQuery struct {
-	response.PageQuery
-	Keyword string `query:"keyword" json:"keyword"`
-	Type    string `query:"type" json:"type"`
-	Status  string `query:"status" json:"status"`
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	Type          string    `json:"type"`
+	TypeGroup     string    `json:"type_group"`
+	Host          string    `json:"host"`
+	Port          int       `json:"port"`
+	Username      string    `json:"username"`
+	PasswordSaved bool      `json:"password_saved"`
+	Remark        string    `json:"remark"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type CreateRequest struct {
@@ -36,6 +28,10 @@ type CreateRequest struct {
 	Password string `json:"password"`
 	Database string `json:"database"`
 	Remark   string `json:"remark"`
+}
+
+type BatchDeleteRequest struct {
+	IDs []string `json:"ids"`
 }
 
 type UpdateRequest struct {
@@ -56,6 +52,7 @@ func ToDTO(d *Datasource) *DTO {
 		ID:            d.ID,
 		Name:          d.Name,
 		Type:          d.Type,
+		TypeGroup:     d.TypeGroup,
 		Host:          d.Host,
 		Port:          d.Port,
 		Username:      d.Username,

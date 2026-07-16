@@ -3,13 +3,11 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { apiClient } from '../api-client'
 
 export interface Webhook {
-  id: number
+  id: string
   name: string
-  scope: string
-  project_id?: number
   url: string
-  enabled: boolean
   events: string[]
+  is_active: boolean
   created_at: string
   updated_at: string
 }
@@ -30,26 +28,22 @@ export interface WebhookListResponse {
 
 export interface CreateWebhookInput {
   name: string
-  scope: string
-  project_id?: number
   url: string
-  enabled?: boolean
   events: string[]
+  is_active?: boolean
 }
 
 export interface UpdateWebhookInput {
-  id: number
-  name: string
-  scope: string
-  project_id?: number
-  url: string
-  enabled?: boolean
-  events: string[]
+  id: string
+  name?: string
+  url?: string
+  events?: string[]
+  is_active?: boolean
 }
 
 export interface DeliveryLog {
-  id: number
-  webhook_id: number
+  id: string
+  webhook_id: string
   event: string
   url: string
   status: string
@@ -69,9 +63,14 @@ export interface DeliveryLogResponse {
 export const WEBHOOK_EVENTS = [
   'ticket.created',
   'ticket.approved',
+  'ticket.partially_approved',
   'ticket.rejected',
   'ticket.executed',
   'ticket.execution_failed',
+  'ticket.urged',
+  'escalation.created',
+  'escalation.approved',
+  'escalation.rejected',
 ]
 
 export const useWebhooks = ({ page, pageSize, needCount = true, keyword }: WebhookListParams) => {
@@ -111,7 +110,7 @@ export const useUpdateWebhook = () => {
   })
 }
 
-export const useWebhookDeliveryLogs = (webhookId: number, page: number = 1, pageSize: number = 20) => {
+export const useWebhookDeliveryLogs = (webhookId: string, page: number = 1, pageSize: number = 20) => {
   return useQuery({
     queryKey: ['webhook-delivery-logs', webhookId, page, pageSize],
     queryFn: () => apiClient<DeliveryLogResponse>(`/webhooks/${webhookId}/delivery-logs`, {

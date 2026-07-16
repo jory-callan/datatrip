@@ -7,12 +7,14 @@ import (
 	"net"
 	"time"
 
+	"czwlinux.cloud/go-friday-starter/pkg/driver"
+
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 // TestConnection 测试数据源连接，使用临时连接，测试完成后关闭
-func TestConnection(ctx context.Context, id uint) (bool, string) {
+func TestConnection(ctx context.Context, id string) (bool, string) {
 	d, err := GetByID(ctx, id)
 	if err != nil {
 		return false, "数据源不存在"
@@ -48,14 +50,16 @@ func TestConnection(ctx context.Context, id uint) (bool, string) {
 }
 
 func buildDSN(d *Datasource) (string, string) {
-	switch d.Type {
-	case TypeMySQL:
-		return "mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=true&loc=Local",
-			d.Username, d.Password, d.Host, d.Port, d.Database)
-	case TypePostgreSQL:
-		return "pgx", fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
-			d.Username, d.Password, d.Host, d.Port, d.Database)
-	default:
+	c, err := driver.GetSQLConnector(d.Type)
+	if err != nil {
 		return "", ""
 	}
+	return c.DSN(driver.ConnConfig{
+		Type:     d.Type,
+		Host:     d.Host,
+		Port:     d.Port,
+		Username: d.Username,
+		Password: d.Password,
+		Database: d.Database,
+	})
 }

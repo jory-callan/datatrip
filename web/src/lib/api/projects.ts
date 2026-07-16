@@ -2,25 +2,24 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 
 import { apiClient } from '../api-client'
 
-export interface DbProject {
-  id: number
+export interface DataProject {
+  id: string
   name: string
-  datasource_id: number
-  databases: string[]
+  datasource_id: string
+  scope: string[]
   approval_mode: string
-  approver_ids: number[]
-  auto_match_approver: boolean
-  webhook_ids: number[]
+  webhook_ids: string[]
   created_at: string
   updated_at: string
 }
 
 export interface ProjectMember {
-  id: number
-  project_id: number
-  user_id: number
+  id: string
+  project_id: string
+  user_id: string
   role: string
   created_at: string
+  updated_at: string
 }
 
 export interface ProjectListParams {
@@ -31,7 +30,7 @@ export interface ProjectListParams {
 }
 
 export interface ProjectListResponse {
-  list: DbProject[]
+  list: DataProject[]
   total: number
   page: number
   page_size: number
@@ -39,28 +38,23 @@ export interface ProjectListResponse {
 
 export interface CreateProjectInput {
   name: string
-  datasource_id: number
-  databases: string[]
-  approval_mode: string
-  approver_ids: number[]
-  auto_match_approver?: boolean
-  webhook_ids: number[]
+  datasource_id: string
+  scope?: string[]
+  approval_mode?: string
+  webhook_ids?: string[]
 }
 
 export interface UpdateProjectInput {
-  id: number
-  name: string
-  datasource_id: number
-  databases: string[]
-  approval_mode: string
-  approver_ids: number[]
-  auto_match_approver?: boolean
-  webhook_ids: number[]
+  id: string
+  name?: string
+  scope?: string[]
+  approval_mode?: string
+  webhook_ids?: string[]
 }
 
 export interface UpdateProjectMembersInput {
-  projectId: number
-  members: { user_id: number; role: string }[]
+  projectId: string
+  members: { user_id: string; role: string }[]
 }
 
 export const useProjects = ({ page, pageSize, needCount = true, keyword }: ProjectListParams) => {
@@ -81,7 +75,7 @@ export const useProjects = ({ page, pageSize, needCount = true, keyword }: Proje
 export const useCreateProject = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: CreateProjectInput) => apiClient<DbProject>('/projects', {
+    mutationFn: (data: CreateProjectInput) => apiClient<DataProject>('/projects', {
       method: 'POST',
       body: data,
     }),
@@ -92,7 +86,7 @@ export const useCreateProject = () => {
 export const useUpdateProject = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, ...data }: UpdateProjectInput) => apiClient<DbProject>(`/projects/${id}`, {
+    mutationFn: ({ id, ...data }: UpdateProjectInput) => apiClient<DataProject>(`/projects/${id}`, {
       method: 'PUT',
       body: data,
     }),
@@ -103,7 +97,7 @@ export const useUpdateProject = () => {
 export const useDeleteProject = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: number) => apiClient<null>(`/projects/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => apiClient<null>(`/projects/${id}`, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
   })
 }
@@ -123,10 +117,21 @@ export const useUpdateProjectMembers = () => {
   })
 }
 
-export const useProjectMembers = (projectId: number | null) => {
+export const useProjectMembers = (projectId: string | null) => {
   return useQuery({
     queryKey: ['project-members', projectId],
     queryFn: () => apiClient<ProjectMember[]>(`/projects/${projectId}/members`),
     enabled: projectId != null,
+  })
+}
+
+export const useBatchDeleteProject = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: string[]) => apiClient<null>('/projects/batch-delete', {
+      method: 'POST',
+      body: { ids },
+    }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
   })
 }

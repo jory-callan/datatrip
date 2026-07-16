@@ -123,8 +123,6 @@ export function ProfilePage() {
                   </>
                 )}
               </dd>
-              <dt className="text-muted-foreground">{'角色'}</dt>
-              <dd>{currentUser.role_code || '-'}</dd>
               <dt className="text-muted-foreground">{'状态'}</dt>
               <dd>{currentUser.status || '-'}</dd>
             </dl>

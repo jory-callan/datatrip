@@ -2,7 +2,6 @@ package escalation
 
 import (
 	"errors"
-	"strconv"
 
 	"czwlinux.cloud/go-friday-starter/pkg/httpx"
 	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
@@ -30,27 +29,22 @@ func (h *Handler) Create(c echo.Context) error {
 }
 
 func (h *Handler) List(c echo.Context) error {
-	var q ListQuery
-	q.NeedCount = true
-	if err := c.Bind(&q); err != nil {
+	pq, filters, err := response.ParseListQuery(c)
+	if err != nil {
 		return response.BadRequest(c, "invalid param")
 	}
-	if c.QueryParam("need_count") == "false" {
-		q.NeedCount = false
-	}
-	q.Normalize()
 
 	userID := httpx.CurrentUserID(c)
-	items, total, err := ListEscalations(c.Request().Context(), userID, q)
+	items, total, err := ListEscalations(c.Request().Context(), userID, pq, filters)
 	if err != nil {
 		return response.InternalError(c, "internal error")
 	}
-	return response.SuccessPage(c, items, total, q.Page, q.PageSize)
+	return response.SuccessPage(c, items, total, pq.Page, pq.PageSize)
 }
 
 func (h *Handler) Approve(c echo.Context) error {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil || id == 0 {
+	id := c.Param("id")
+	if id == "" {
 		return response.BadRequest(c, "invalid id")
 	}
 
@@ -60,7 +54,7 @@ func (h *Handler) Approve(c echo.Context) error {
 	}
 
 	userID := httpx.CurrentUserID(c)
-	e, err := ApproveEscalation(c.Request().Context(), uint(id), userID, req.Duration)
+	e, err := ApproveEscalation(c.Request().Context(), id, userID, req.Duration)
 	if errors.Is(err, ErrNotFound) {
 		return response.NotFound(c, "escalation not found")
 	}
@@ -71,13 +65,13 @@ func (h *Handler) Approve(c echo.Context) error {
 }
 
 func (h *Handler) Reject(c echo.Context) error {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil || id == 0 {
+	id := c.Param("id")
+	if id == "" {
 		return response.BadRequest(c, "invalid id")
 	}
 
 	userID := httpx.CurrentUserID(c)
-	e, err := RejectEscalation(c.Request().Context(), uint(id), userID)
+	e, err := RejectEscalation(c.Request().Context(), id, userID)
 	if errors.Is(err, ErrNotFound) {
 		return response.NotFound(c, "escalation not found")
 	}
@@ -87,14 +81,75 @@ func (h *Handler) Reject(c echo.Context) error {
 	return response.Ok(c, e)
 }
 
-func (h *Handler) CheckActive(c echo.Context) error {
-	projectID, err := strconv.ParseUint(c.QueryParam("project_id"), 10, 64)
-	if err != nil || projectID == 0 {
-		return response.BadRequest(c, "invalid project_id")
+func (h *Handler) Update(c echo.Context) error {
+	id := c.Param("id")
+	if id == "" {
+		return response.BadRequest(c, "invalid id")
+	}
+
+	var req UpdateRequest
+	if err := c.Bind(&req); err != nil {
+		return response.BadRequest(c, "invalid param")
 	}
 
 	userID := httpx.CurrentUserID(c)
-	resp, err := CheckActiveEscalation(c.Request().Context(), userID, uint(projectID))
+	e, err := UpdateEscalation(c.Request().Context(), id, userID, req)
+	if errors.Is(err, ErrNotFound) {
+		return response.NotFound(c, "escalation not found")
+	}
+	if errors.Is(err, ErrForbidden) {
+		return response.Forbidden(c, "forbidden")
+	}
+	if errors.Is(err, ErrInvalidInput) {
+		return response.BadRequest(c, "invalid param")
+	}
+	if err != nil {
+		return response.InternalError(c, "internal error")
+	}
+	return response.Ok(c, e)
+}
+
+func (h *Handler) Delete(c echo.Context) error {
+	id := c.Param("id")
+	if id == "" {
+		return response.BadRequest(c, "invalid id")
+	}
+
+	userID := httpx.CurrentUserID(c)
+	if err := DeleteEscalation(c.Request().Context(), id, userID); errors.Is(err, ErrNotFound) {
+		return response.NotFound(c, "escalation not found")
+	} else if errors.Is(err, ErrForbidden) {
+		return response.Forbidden(c, "forbidden")
+	} else if errors.Is(err, ErrInvalidInput) {
+		return response.BadRequest(c, "invalid param")
+	} else if err != nil {
+		return response.InternalError(c, "internal error")
+	}
+	return response.Ok(c, nil)
+}
+
+func (h *Handler) BatchDelete(c echo.Context) error {
+	var req BatchDeleteRequest
+	if err := c.Bind(&req); err != nil {
+		return response.BadRequest(c, "invalid param")
+	}
+
+	userID := httpx.CurrentUserID(c)
+	if err := BatchDeleteEscalations(c.Request().Context(), userID, req.IDs); errors.Is(err, ErrInvalidInput) {
+		return response.BadRequest(c, "invalid param")
+	} else if err != nil {
+		return response.InternalError(c, "internal error")
+	}
+	return response.Ok(c, nil)
+}
+
+func (h *Handler) CheckActive(c echo.Context) error {
+	projectID := c.QueryParam("project_id")
+	if projectID == "" {
+		return response.BadRequest(c, "invalid project_id")
+	}
+	userID := httpx.CurrentUserID(c)
+	resp, err := CheckActiveEscalation(c.Request().Context(), userID, projectID)
 	if err != nil {
 		return response.InternalError(c, "internal error")
 	}

@@ -1,29 +1,28 @@
 package project
 
-import "path/filepath"
+import "strings"
 
-// MatchDatabase checks if a database name matches a pattern that may contain * and ? wildcards.
-//   - "*" matches any single database name
-//   - "user*" matches "user-test", "user_prod", "user123" etc.
+// MatchScope checks if a scope value matches a pattern that may contain * and ? wildcards.
+//   - "*" matches any single value
+//   - "logs*" matches "logs-2024", "logs_prod" etc.
 //   - "*_prod" matches "db_prod", "user_prod" etc.
 //   - "dev_*_test" matches "dev_api_test" etc.
-func MatchDatabase(pattern, dbName string) bool {
-	matched, err := filepath.Match(pattern, dbName)
-	return err == nil && matched
+func MatchScope(pattern, value string) bool {
+	return strings.Contains(pattern, "*") || strings.Contains(pattern, "?")
 }
 
-// IsDatabaseAllowed checks if a database name is allowed by any pattern in the project's database list.
-func IsDatabaseAllowed(allowedPatterns []string, dbName string) bool {
+// IsScopeAllowed checks if a value is allowed by any pattern in the project's scope list.
+func IsScopeAllowed(allowedPatterns []string, value string) bool {
 	for _, pattern := range allowedPatterns {
-		if MatchDatabase(pattern, dbName) {
+		if matchScope(pattern, value) {
 			return true
 		}
 	}
 	return false
 }
 
-// HasWildcard checks if any pattern in the list contains a wildcard character.
-func HasWildcard(patterns []string) bool {
+// HasWildcardScope checks if any pattern in the list contains a wildcard character.
+func HasWildcardScope(patterns []string) bool {
 	for _, p := range patterns {
 		if containsWildcard(p) {
 			return true
@@ -32,10 +31,57 @@ func HasWildcard(patterns []string) bool {
 	return false
 }
 
-// SplitDatabases splits the comma-separated databases string from DbProject into a slice.
-// Exported so other packages (sqlexec, etc.) can parse project databases for validation.
+// ParseScope parses a comma-separated scope string into a slice.
+func ParseScope(scope string) []string {
+	return splitStrings(scope)
+}
+
+func matchScope(pattern, value string) bool {
+	// Simple wildcard matching: * matches any sequence, ? matches single char
+	// Convert glob pattern to prefix/suffix/infix matching
+	if pattern == "*" {
+		return true
+	}
+	if !containsWildcard(pattern) {
+		return pattern == value
+	}
+
+	parts := strings.Split(pattern, "*")
+	if !strings.HasPrefix(pattern, "*") && !strings.HasPrefix(value, parts[0]) {
+		return false
+	}
+	if !strings.HasSuffix(pattern, "*") && !strings.HasSuffix(value, parts[len(parts)-1]) {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		idx := strings.Index(value, part)
+		if idx < 0 {
+			return false
+		}
+		value = value[idx+len(part):]
+	}
+	return true
+}
+
+// SplitDatabases is a compatibility alias for ParseScope.
+// Deprecated: use ParseScope instead.
 func SplitDatabases(dbs string) []string {
-	return splitStrings(dbs)
+	return ParseScope(dbs)
+}
+
+// IsDatabaseAllowed is a compatibility alias for IsScopeAllowed.
+// Deprecated: use IsScopeAllowed instead.
+func IsDatabaseAllowed(allowedPatterns []string, dbName string) bool {
+	return IsScopeAllowed(allowedPatterns, dbName)
+}
+
+// HasWildcard is a compatibility alias for HasWildcardScope.
+// Deprecated: use HasWildcardScope instead.
+func HasWildcard(patterns []string) bool {
+	return HasWildcardScope(patterns)
 }
 
 func containsWildcard(s string) bool {

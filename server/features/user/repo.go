@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"czwlinux.cloud/go-friday-starter/global"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
+	"czwlinux.cloud/go-friday-starter/pkg/queryfilter"
 	"gorm.io/gorm"
 )
 
@@ -17,48 +19,37 @@ func Save(ctx context.Context, u *User) error {
 	return global.DB.WithContext(ctx).Save(u).Error
 }
 
-func GetByID(ctx context.Context, id uint) (*User, error) {
+func GetByID(ctx context.Context, id string) (*User, error) {
 	var u User
-	if err := global.DB.WithContext(ctx).First(&u, id).Error; err != nil {
+	if err := global.DB.WithContext(ctx).Where("id = ?", id).First(&u).Error; err != nil {
 		return nil, err
 	}
 	return &u, nil
 }
 
-func List(ctx context.Context, query ListQuery) ([]User, int64, error) {
+func List(ctx context.Context, pq response.PageQuery, filters map[string]string) ([]User, int64, error) {
 	var users []User
-	var total int64
 	db := global.DB.WithContext(ctx).Model(&User{})
 
-	keyword := strings.TrimSpace(query.Keyword)
-	if keyword != "" {
+	// keyword — 特殊多列搜索
+	if keyword := strings.TrimSpace(filters["keyword"]); keyword != "" {
 		like := "%" + keyword + "%"
-		db = db.Where("username LIKE ? OR nickname LIKE ?", like, like)
-	}
-	status := strings.TrimSpace(query.Status)
-	if status != "" {
-		db = db.Where("status = ?", status)
-	}
-	roleCode := strings.TrimSpace(query.RoleCode)
-	if roleCode != "" {
-		db = db.Where("role_code = ?", roleCode)
+		db = db.Where("username LIKE ? OR nickname LIKE ? OR email LIKE ?", like, like, like)
 	}
 
-	if query.NeedCount {
-		if err := db.Count(&total).Error; err != nil {
-			return nil, 0, err
-		}
-	}
-	if err := db.Order("id asc").Offset(query.Offset()).Limit(query.PageSize).Find(&users).Error; err != nil {
+	// 通用 filter
+	db = queryfilter.ApplyAll(db, filters, map[string]string{
+		"status": "status",
+	})
+
+	total, err := queryfilter.Paginate(db.Order("id asc"), pq.Page, pq.PageSize, pq.NeedCount, &users)
+	if err != nil {
 		return nil, 0, err
-	}
-	if !query.NeedCount {
-		total = int64(len(users))
 	}
 	return users, total, nil
 }
 
-func ListByIDs(ctx context.Context, ids []uint) ([]User, error) {
+func ListByIDs(ctx context.Context, ids []string) ([]User, error) {
 	if len(ids) == 0 {
 		return []User{}, nil
 	}
@@ -72,8 +63,8 @@ func ListByIDs(ctx context.Context, ids []uint) ([]User, error) {
 	return users, nil
 }
 
-func DeleteByID(ctx context.Context, id uint) error {
-	result := global.DB.WithContext(ctx).Delete(&User{}, id)
+func DeleteByID(ctx context.Context, id string) error {
+	result := global.DB.WithContext(ctx).Where("id = ?", id).Delete(&User{})
 	if result.Error != nil {
 		return result.Error
 	}
@@ -83,7 +74,7 @@ func DeleteByID(ctx context.Context, id uint) error {
 	return nil
 }
 
-func DeleteByIDs(ctx context.Context, ids []uint) error {
+func DeleteByIDs(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}

@@ -6,24 +6,27 @@ import { toast } from 'sonner'
 import { format } from 'sql-formatter'
 
 import { apiClient, getApiErrorMessage } from '@/lib/api-client'
+import { useAppStore } from '@/stores/app-store'
 import { useProjects } from '@/lib/api/projects'
-import { useExecuteSql, useExecuteEscalated, useProjectTables } from '@/lib/api/sqlexec'
+import { useExecuteSql, useExecuteEscalated, useProjectTables, type ProjectColumnsResponse, type ColumnInfoData } from '@/lib/api/sqlexec'
 import { useCreateTicket } from '@/lib/api/tickets'
 import { useActiveEscalation, useCreateEscalation } from '@/lib/api/escalations'
-import { useMyFavorites } from '@/lib/api/sql-favorites'
+import { useCreateSnippet, useDeleteSnippet, useUpdateSnippet, useMySnippets } from '@/lib/api/snippets'
+import { useAudits } from '@/lib/api/audits'
+import type { AuditLog } from '@/lib/api/audits'
 import type { ProjectDatabasesResponse } from '@/lib/api/sqlexec'
 
-import type { EditorTab, ExecutionHistoryEntry, ResultTab, TableContextMenuState } from './types'
-import { LS_KEYS, loadFromStorage, nextHistoryId, nextTabId, saveToStorage, historyIdCounter } from './utils'
+import type { EditorTab, ResultTab, TableContextMenuState } from './types'
+import { LS_KEYS, loadFromStorage, nextTabId, saveToStorage } from './utils'
 
 export function useWorkbench() {
 
   const navigate = useNavigate()
+  const currentUser = useAppStore((s) => s.user)
 
   // Persisted state
   const [leftPanelTab, setLeftPanelTab] = useState(() => loadFromStorage(LS_KEYS.leftPanelTab, 'database'))
-  const [storedHistory] = useState<ExecutionHistoryEntry[]>(() => loadFromStorage(LS_KEYS.executionHistory, []))
-  const [storedSelectedProjectIds] = useState<number[]>(() => loadFromStorage(LS_KEYS.selectedProjects, []))
+  const [storedSelectedProjectIds] = useState<string[]>(() => loadFromStorage(LS_KEYS.selectedProjects, []))
 
   // Editor tabs
   const initialTabId = useRef(nextTabId())
@@ -40,28 +43,119 @@ export function useWorkbench() {
   // Ticket dialog
   const createTicketMutation = useCreateTicket()
   const [ticketDialog, setTicketDialog] = useState<{
-    open: boolean; projectId: number; projectName: string; database: string; sql: string
-  }>({ open: false, projectId: 0, projectName: '', database: '', sql: '' })
+    open: boolean; projectId: string; projectName: string; database: string; sql: string
+  }>({ open: false, projectId: '', projectName: '', database: '', sql: '' })
   const ticketTitleRef = useRef('')
   const ticketDescRef = useRef('')
 
   // Escalation dialog
   const createEscalationMutation = useCreateEscalation()
   const [escalationDialog, setEscalationDialog] = useState<{
-    open: boolean; projectId: number; database: string; sql: string
-  }>({ open: false, projectId: 0, database: '', sql: '' })
+    open: boolean; projectId: string; database: string; sql: string
+  }>({ open: false, projectId: '', database: '', sql: '' })
   const escalationReasonRef = useRef('')
+
+  // Snippet management
+  const createSnippetMutation = useCreateSnippet()
+  const deleteSnippetMutation = useDeleteSnippet()
+  const updateSnippetMutation = useUpdateSnippet()
+  const [snippetDialog, setSnippetDialog] = useState<{
+    open: boolean; editingId: string | null; name: string; content: string; datasource_type: string
+  }>({ open: false, editingId: null, name: '', content: '', datasource_type: '' })
+
+  const handleSaveSnippet = useCallback(async () => {
+    if (!snippetDialog.name.trim() || !snippetDialog.content.trim()) {
+      toast.error('请填写片段名称和内容')
+      return
+    }
+    if (!snippetDialog.datasource_type) {
+      toast.error('请选择数据源类型')
+      return
+    }
+    try {
+      if (snippetDialog.editingId) {
+        await updateSnippetMutation.mutateAsync({
+          id: snippetDialog.editingId,
+          name: snippetDialog.name.trim(),
+          content: snippetDialog.content.trim(),
+          datasource_type: snippetDialog.datasource_type || '',
+        })
+        toast.success('代码片段已更新')
+      } else {
+        await createSnippetMutation.mutateAsync({
+          name: snippetDialog.name.trim(),
+          content: snippetDialog.content.trim(),
+          datasource_type: snippetDialog.datasource_type || '',
+        })
+        toast.success('代码片段已保存')
+      }
+      setSnippetDialog((prev) => ({ ...prev, open: false, editingId: null, name: '', content: '' }))
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, '保存失败'))
+    }
+  }, [snippetDialog, createSnippetMutation, updateSnippetMutation])
+
+  const handleDeleteSnippet = useCallback(async (id: string) => {
+    const ok = window.confirm('确定删除此代码片段？')
+    if (!ok) return
+    try {
+      await deleteSnippetMutation.mutateAsync(id)
+      toast.success('代码片段已删除')
+    } catch (err) {
+      toast.error(getApiErrorMessage(err, '删除失败'))
+    }
+  }, [deleteSnippetMutation])
 
   // Table context menu
   const [tableContextMenu, setTableContextMenu] = useState<TableContextMenuState | null>(null)
 
   // Multi-project state
-  const [selectedProjectIds, setSelectedProjectIds] = useState<number[]>(storedSelectedProjectIds)
-  const [activeDbForTables, setActiveDbForTables] = useState<{ projectId: number; database: string } | null>(null)
+  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>(storedSelectedProjectIds)
+  const [activeDbForTables, setActiveDbForTables] = useState<{ projectId: string; database: string } | null>(null)
 
-  // Execution history
-  const [executionHistory, setExecutionHistory] = useState<ExecutionHistoryEntry[]>(storedHistory)
-  const [historyFilter, setHistoryFilter] = useState('')
+  // ─── Execution history (via Audit API) ───────────────────
+
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyPageSize] = useState(50)
+  const [historyTimeRange, setHistoryTimeRange] = useState<string | null>('7d') // '7d' | '30d' | '90d' | '1y' | null
+  const [historyKeyword, setHistoryKeyword] = useState('')
+
+  const timeRangeStart = useMemo(() => {
+    if (!historyTimeRange) return undefined
+    const now = Date.now()
+    const ranges: Record<string, number> = { '7d': 7, '30d': 30, '90d': 90, '1y': 365 }
+    return new Date(now - (ranges[historyTimeRange] ?? 7) * 86400000).toISOString()
+  }, [historyTimeRange])
+
+  const auditQuery = useAudits({
+    page: 1,
+    pageSize: historyPageSize,
+    needCount: false,
+    actor_id: currentUser?.id,
+    start_time: timeRangeStart,
+  })
+
+  // Client-side filter + paginate
+  const filteredAuditHistory = useMemo(() => {
+    const list = auditQuery.data?.list ?? []
+    const kw = historyKeyword.trim().toLowerCase()
+    let filtered = kw ? list.filter((a) => a.raw_text?.toLowerCase().includes(kw)) : list
+    const total = filtered.length
+    const totalPages = Math.max(1, Math.ceil(total / historyPageSize))
+    const page = Math.min(historyPage, totalPages)
+    const start = (page - 1) * historyPageSize
+    return {
+      items: filtered.slice(start, start + historyPageSize),
+      total,
+      page,
+      totalPages,
+    }
+  }, [auditQuery.data, historyKeyword, historyPage, historyPageSize])
+
+  // History right-click context menu
+  const [historyContextMenu, setHistoryContextMenu] = useState<{
+    x: number; y: number; raw_text: string; project_id: string
+  } | null>(null)
 
   // Tab right-click context menus
   const [tabContextMenu, setTabContextMenu] = useState<{ x: number; y: number; index: number } | null>(null)
@@ -74,6 +168,32 @@ export function useWorkbench() {
 
   // Auto-execute trigger for table preview
   const pendingAutoExecuteRef = useRef(false)
+
+  // Table column expansion (database tree)
+  const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set())
+  const [tableColumnsMap, setTableColumnsMap] = useState<Map<string, ColumnInfoData[]>>(new Map())
+  const [loadingColumns, setLoadingColumns] = useState<Set<string>>(new Set())
+
+  const handleTableExpand = useCallback(async (tableName: string, projectId: string, database: string) => {
+    const key = `${database}.${tableName}`
+    if (expandedTables.has(key)) {
+      setExpandedTables((prev) => { const n = new Set(prev); n.delete(key); return n })
+      return
+    }
+    setExpandedTables((prev) => { const n = new Set(prev); n.add(key); return n })
+    if (tableColumnsMap.has(key)) return
+    setLoadingColumns((prev) => { const n = new Set(prev); n.add(key); return n })
+    try {
+      const res = await apiClient<ProjectColumnsResponse>(`/projects/${projectId}/meta/columns`, {
+        query: { database, table: tableName },
+      })
+      setTableColumnsMap((prev) => { const n = new Map(prev); n.set(key, res.columns); return n })
+    } catch {
+      // apiClient handles error toast
+    } finally {
+      setLoadingColumns((prev) => { const n = new Set(prev); n.delete(key); return n })
+    }
+  }, [expandedTables, tableColumnsMap])
 
   // Column width state for resizable columns
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({})
@@ -89,10 +209,6 @@ export function useWorkbench() {
   // Persist effects
   useEffect(() => { saveToStorage(LS_KEYS.selectedProjects, selectedProjectIds) }, [selectedProjectIds])
   useEffect(() => { saveToStorage(LS_KEYS.leftPanelTab, leftPanelTab) }, [leftPanelTab])
-  useEffect(() => {
-    saveToStorage(LS_KEYS.executionHistory, executionHistory)
-    saveToStorage('sql-wb-history-counter', historyIdCounter)
-  }, [executionHistory])
 
   // Data
   const { data: projectsData } = useProjects({ page: 1, pageSize: 200, needCount: false })
@@ -122,7 +238,7 @@ export function useWorkbench() {
   const { data: activeEscalationData } = useActiveEscalation(activeTab?.projectId)
 
   // SQL Favorites
-  const myFavorites = useMyFavorites()
+  const mySnippets = useMySnippets()
 
   // Keyboard shortcut: Ctrl+Enter / Cmd+Enter
   useEffect(() => {
@@ -217,11 +333,6 @@ export function useWorkbench() {
     try {
       const result = await executeMutation.mutateAsync({ project_id: projectId, database, sql: sqlToExecute })
 
-      const entry: ExecutionHistoryEntry = {
-        id: nextHistoryId(), sql: sqlToExecute, projectId, projectName, database, timestamp: Date.now(),
-      }
-      setExecutionHistory((prev) => [entry, ...prev].slice(0, 500))
-
       const resultTabId = Date.now()
 
       if (result.mode === 'direct') {
@@ -230,10 +341,10 @@ export function useWorkbench() {
               id: resultTabId + i,
               title: `结果 ${resultTabs.length + i + 1}`,
               sql: sqlToExecute,
-              columns: qr.columns.map((col) => ({ name: col })),
+              columns: qr.columns,
               rows: qr.rows.map((row) => {
                 const obj: Record<string, unknown> = {}
-                qr.columns.forEach((col, ci) => { obj[col] = row[ci] })
+                qr.columns.forEach((col, ci) => { obj[col.name] = row[ci] })
                 return obj
               }),
               rowCount: qr.total,
@@ -263,7 +374,7 @@ export function useWorkbench() {
   }, [activeTab, isExecuting, executeMutation, projects, resultTabs.length, getEditorSql])
 
   // Tab management
-  const addTab = useCallback((params?: { sql?: string; projectId?: number; database?: string }) => {
+  const addTab = useCallback((params?: { sql?: string; projectId?: string; database?: string }) => {
     const newId = nextTabId()
     const newTab: EditorTab = {
       id: newId,
@@ -296,7 +407,7 @@ export function useWorkbench() {
   }, [activeTabIndex])
 
   // Database tree
-  const handleDatabaseSelect = useCallback((projectId: number, db: string) => {
+  const handleDatabaseSelect = useCallback((projectId: string, db: string) => {
     if (activeDbForTables?.projectId === projectId && activeDbForTables?.database === db) {
       setActiveDbForTables(null)
     } else {
@@ -304,24 +415,24 @@ export function useWorkbench() {
     }
   }, [activeDbForTables])
 
-  const handleDatabaseNewTab = useCallback((projectId: number, db: string) => {
+  const handleDatabaseNewTab = useCallback((projectId: string, db: string) => {
     addTab({ projectId, database: db })
     if (!selectedProjectIds.includes(projectId)) {
       setSelectedProjectIds((prev) => [...prev, projectId])
     }
   }, [addTab, selectedProjectIds])
 
-  const handleTableContextMenu = useCallback((e: React.MouseEvent, tableName: string, projectId: number, database: string) => {
+  const handleTableContextMenu = useCallback((e: React.MouseEvent, tableName: string, projectId: string, database: string) => {
     e.preventDefault()
     setTableContextMenu({ x: e.clientX, y: e.clientY, tableName, projectId, database })
   }, [])
 
-  const handleCopySelect = useCallback((tableName: string, projectId: number, database: string) => {
+  const handleCopySelect = useCallback((tableName: string, projectId: string, database: string) => {
     const sql = `SELECT * FROM ${tableName} LIMIT 100`
     addTab({ sql, projectId, database })
   }, [addTab])
 
-  const handlePreviewTable = useCallback((tableName: string, projectId: number, database: string) => {
+  const handlePreviewTable = useCallback((tableName: string, projectId: string, database: string) => {
     const sql = `SELECT * FROM ${tableName} LIMIT 100`
     addTab({ sql, projectId, database })
     // Mark for auto-execution after tab switch
@@ -342,11 +453,15 @@ export function useWorkbench() {
   }, [activeTab, updateTabSql])
 
   // Favorite click: open SQL in a new tab
-  const handleFavoriteClick = useCallback((fav: { sql: string; project_id: number; database: string }) => {
-    addTab({ sql: fav.sql, projectId: fav.project_id, database: fav.database })
+  const handleFavoriteClick = useCallback((fav: { content: string }) => {
+    addTab({ sql: fav.content })
   }, [addTab])
 
   // Tab right-click handlers
+  const renameTab = useCallback((newTitle: string, index: number) => {
+    setTabs((prev) => prev.map((t, i) => (i === index ? { ...t, title: newTitle || `SQL ${i + 1}` } : t)))
+  }, [])
+
   const closeTabByIndex = useCallback((index: number) => {
     if (tabs.length <= 1) return
     setTabs((prev) => prev.filter((_, i) => i !== index))
@@ -403,7 +518,7 @@ export function useWorkbench() {
     try {
       await createTicketMutation.mutateAsync({
         project_id: ticketDialog.projectId,
-        sql_snapshot: ticketDialog.sql,
+        instruction_json: JSON.stringify([{ raw: ticketDialog.sql }]),
         title,
         description: ticketDescRef.current.trim(),
       })
@@ -437,21 +552,16 @@ export function useWorkbench() {
         sql: sqlToExecute,
       })
 
-      const entry: ExecutionHistoryEntry = {
-        id: nextHistoryId(), sql: sqlToExecute, projectId, projectName, database, timestamp: Date.now(),
-      }
-      setExecutionHistory((prev) => [entry, ...prev].slice(0, 500))
-
       const resultTabId = Date.now()
       const newResultTabs: ResultTab[] = result.results?.length
         ? result.results.map((qr, i) => ({
             id: resultTabId + i,
             title: `结果 ${resultTabs.length + i + 1}`,
             sql: sqlToExecute,
-            columns: qr.columns.map((col) => ({ name: col })),
+            columns: qr.columns,
             rows: qr.rows.map((row) => {
               const obj: Record<string, unknown> = {}
-              qr.columns.forEach((col, ci) => { obj[col] = row[ci] })
+              qr.columns.forEach((col, ci) => { obj[col.name] = row[ci] })
               return obj
             }),
             rowCount: qr.total,
@@ -507,24 +617,21 @@ export function useWorkbench() {
   }, [])
 
   // History handlers
-  const handleHistoryDoubleClick = useCallback((entry: ExecutionHistoryEntry) => {
-    addTab({ sql: entry.sql, projectId: entry.projectId, database: entry.database })
-    if (!selectedProjectIds.includes(entry.projectId)) {
-      setSelectedProjectIds((prev) => [...prev, entry.projectId])
+  const handleHistoryDoubleClick = useCallback((entry: AuditLog) => {
+    addTab({ sql: entry.raw_text, projectId: entry.project_id })
+    if (!selectedProjectIds.includes(entry.project_id)) {
+      setSelectedProjectIds((prev) => [...prev, entry.project_id])
     }
   }, [addTab, selectedProjectIds])
 
-  const filteredHistory = useMemo(() => {
-    if (!historyFilter.trim()) return executionHistory
-    const q = historyFilter.toLowerCase()
-    return executionHistory.filter(
-      (h) => h.sql.toLowerCase().includes(q) || h.projectName.toLowerCase().includes(q) || h.database.toLowerCase().includes(q),
-    )
-  }, [executionHistory, historyFilter])
+  const handleHistoryContextMenu = useCallback((e: React.MouseEvent, entry: AuditLog) => {
+    e.preventDefault()
+    setHistoryContextMenu({ x: e.clientX, y: e.clientY, raw_text: entry.raw_text, project_id: entry.project_id })
+  }, [])
 
   // Build project databases map for tree
   const projectDatabasesMap = useMemo(() => {
-    const map = new Map<number, string[]>()
+    const map = new Map<string, string[]>()
     selectedProjectIds.forEach((pid, idx) => {
       const qResult = databaseQueries[idx]
       if (qResult?.data?.databases) map.set(pid, qResult.data.databases)
@@ -544,8 +651,14 @@ export function useWorkbench() {
     tables, isLoadingTables,
     selectedProjectIds, setSelectedProjectIds,
     activeDbForTables, setActiveDbForTables,
-    executionHistory, historyFilter, setHistoryFilter,
-    filteredHistory,
+    expandedTables, tableColumnsMap, loadingColumns,
+    handleTableExpand,
+    historyKeyword, setHistoryKeyword,
+    historyTimeRange, setHistoryTimeRange,
+    historyPage, setHistoryPage,
+    auditQuery,
+    filteredAuditHistory,
+    historyContextMenu, setHistoryContextMenu,
     tableContextMenu, setTableContextMenu,
     tabContextMenu, setTabContextMenu,
     resultTabContextMenu, setResultTabContextMenu,
@@ -556,7 +669,10 @@ export function useWorkbench() {
     activeEscalationData,
     createTicketMutation, createEscalationMutation,
     editorRef,
-    myFavorites,
+    mySnippets,
+    snippetDialog, setSnippetDialog,
+    handleSaveSnippet, handleDeleteSnippet,
+    createSnippetMutation, deleteSnippetMutation,
 
     // Queries (for DB tree loading state)
     databaseQueries: databaseQueries as any,
@@ -572,10 +688,10 @@ export function useWorkbench() {
     handlePreviewTable,
     handleFormatSql,
     handleFavoriteClick,
-    closeTabByIndex, closeOtherTabs, closeAllTabs,
+    renameTab, closeTabByIndex, closeOtherTabs, closeAllTabs,
     closeResultTabByIndex, closeOtherResultTabs, closeAllResultTabs,
     handleTicket, handleSubmitTicket,
     handleEscalatedExecute, handleEscalationRequest, handleSubmitEscalation,
-    handleEditorMount, handleHistoryDoubleClick,
+    handleEditorMount, handleHistoryDoubleClick, handleHistoryContextMenu,
   }
 }

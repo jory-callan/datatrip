@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"czwlinux.cloud/go-friday-starter/global"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
 	"gorm.io/gorm"
 )
 
@@ -13,24 +14,24 @@ var (
 	ErrInvalidInput = errors.New("invalid input")
 )
 
-// CreateAuditLog creates an audit log entry (append-only).
 func CreateAuditLog(ctx context.Context, req CreateAuditLogRequest) (*DTO, error) {
 	if req.Action == "" {
 		return nil, ErrInvalidInput
 	}
 
 	a := &AuditLog{
-		ActorID:        req.ActorID,
-		ProjectID:      req.ProjectID,
-		DatasourceID:   req.DatasourceID,
-		Action:         req.Action,
-		Sql:            req.Sql,
-		Classification: req.Classification,
-		Status:         req.Status,
-		DurationMs:     req.DurationMs,
-		ErrorMessage:   req.ErrorMessage,
-		TicketID:       req.TicketID,
-		IP:             req.IP,
+		ActorID:         req.ActorID,
+		ProjectID:       req.ProjectID,
+		DatasourceID:    req.DatasourceID,
+		Action:          req.Action,
+		RawText:         req.RawText,
+		InstructionJSON: req.InstructionJSON,
+		Classification:  req.Classification,
+		Status:          req.Status,
+		DurationMs:      req.DurationMs,
+		ErrorMessage:    req.ErrorMessage,
+		TicketID:        req.TicketID,
+		IP:              req.IP,
 	}
 	if a.Status == "" {
 		a.Status = StatusPending
@@ -42,10 +43,8 @@ func CreateAuditLog(ctx context.Context, req CreateAuditLogRequest) (*DTO, error
 	return ToDTO(a), nil
 }
 
-// ListAuditLogs returns paginated audit logs.
-func ListAuditLogs(ctx context.Context, query ListQuery) ([]*DTO, int64, error) {
-	query.Normalize()
-	items, total, err := List(ctx, query)
+func ListAuditLogs(ctx context.Context, pq response.PageQuery, filters map[string]string) ([]*DTO, int64, error) {
+	items, total, err := List(ctx, pq, filters)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -56,13 +55,12 @@ func ListAuditLogs(ctx context.Context, query ListQuery) ([]*DTO, int64, error) 
 	return result, total, nil
 }
 
-// GetAuditLog returns a single audit log by ID.
-func GetAuditLog(ctx context.Context, id uint) (*DTO, error) {
-	if id == 0 {
+func GetAuditLog(ctx context.Context, id string) (*DTO, error) {
+	if id == "" {
 		return nil, ErrInvalidInput
 	}
 	var a AuditLog
-	if err := global.DB.WithContext(ctx).First(&a, id).Error; err != nil {
+	if err := global.DB.WithContext(ctx).Where("id = ?", id).First(&a).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}

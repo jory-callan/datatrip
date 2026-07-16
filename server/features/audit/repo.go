@@ -5,62 +5,44 @@ import (
 	"strings"
 
 	"czwlinux.cloud/go-friday-starter/global"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
+	"czwlinux.cloud/go-friday-starter/pkg/queryfilter"
 )
 
 func Create(ctx context.Context, a *AuditLog) error {
 	return global.DB.WithContext(ctx).Create(a).Error
 }
 
-func List(ctx context.Context, query ListQuery) ([]AuditLog, int64, error) {
+func List(ctx context.Context, pq response.PageQuery, filters map[string]string) ([]AuditLog, int64, error) {
 	var items []AuditLog
-	var total int64
 	db := global.DB.WithContext(ctx).Model(&AuditLog{})
 
-	if query.ActorID > 0 {
-		db = db.Where("actor_id = ?", query.ActorID)
-	}
-	if query.ProjectID > 0 {
-		db = db.Where("project_id = ?", query.ProjectID)
-	}
-	if query.DatasourceID > 0 {
-		db = db.Where("datasource_id = ?", query.DatasourceID)
-	}
-	action := strings.TrimSpace(query.Action)
-	if action != "" {
-		db = db.Where("action = ?", action)
-	}
-	status := strings.TrimSpace(query.Status)
-	if status != "" {
-		db = db.Where("status = ?", status)
-	}
-	classification := strings.TrimSpace(query.Classification)
-	if classification != "" {
-		db = db.Where("classification = ?", classification)
-	}
-	startTime := strings.TrimSpace(query.StartTime)
-	if startTime != "" {
+	// 通用 filter（actor_id, project_id, datasource_id, action, status, classification）
+	db = queryfilter.ApplyAll(db, filters, map[string]string{
+		"actor_id":       "actor_id",
+		"project_id":     "project_id",
+		"datasource_id":  "datasource_id",
+		"action":         "action",
+		"status":         "status",
+		"classification": "classification",
+	})
+
+	// start_time / end_time — 特殊时间范围（前端传纯值，不是约定前缀）
+	if startTime := strings.TrimSpace(filters["start_time"]); startTime != "" {
 		db = db.Where("created_at >= ?", startTime)
 	}
-	endTime := strings.TrimSpace(query.EndTime)
-	if endTime != "" {
+	if endTime := strings.TrimSpace(filters["end_time"]); endTime != "" {
 		db = db.Where("created_at <= ?", endTime)
 	}
 
-	if query.NeedCount {
-		if err := db.Count(&total).Error; err != nil {
-			return nil, 0, err
-		}
-	}
-	if err := db.Order("id desc").Offset(query.Offset()).Limit(query.PageSize).Find(&items).Error; err != nil {
+	total, err := queryfilter.Paginate(db.Order("id desc"), pq.Page, pq.PageSize, pq.NeedCount, &items)
+	if err != nil {
 		return nil, 0, err
-	}
-	if !query.NeedCount {
-		total = int64(len(items))
 	}
 	return items, total, nil
 }
 
-func ListByTicketID(ctx context.Context, ticketID uint) ([]*DTO, error) {
+func ListByTicketID(ctx context.Context, ticketID string) ([]*DTO, error) {
 	var items []AuditLog
 	if err := global.DB.WithContext(ctx).
 		Where("ticket_id = ?", ticketID).

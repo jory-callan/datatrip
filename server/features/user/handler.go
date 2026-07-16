@@ -3,7 +3,6 @@ package user
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"czwlinux.cloud/go-friday-starter/pkg/authctx"
@@ -18,21 +17,16 @@ func NewHandler() *Handler {
 }
 
 func (h *Handler) List(c echo.Context) error {
-	var q ListQuery
-	q.NeedCount = true
-	if err := c.Bind(&q); err != nil {
+	pq, filters, err := response.ParseListQuery(c)
+	if err != nil {
 		return response.BadRequest(c, "invalid param")
 	}
-	if c.QueryParam("need_count") == "false" {
-		q.NeedCount = false
-	}
-	q.Normalize()
 
-	items, total, err := ListUsers(c.Request().Context(), q)
+	items, total, err := ListUsers(c.Request().Context(), pq, filters)
 	if err != nil {
 		return response.InternalError(c, "internal error")
 	}
-	return response.SuccessPage(c, items, total, q.Page, q.PageSize)
+	return response.SuccessPage(c, items, total, pq.Page, pq.PageSize)
 }
 
 func (h *Handler) Create(c echo.Context) error {
@@ -156,10 +150,10 @@ func (h *Handler) UpdateProfile(c echo.Context) error {
 	return response.Ok(c, profile)
 }
 
-func parseID(c echo.Context) (uint, error) {
-	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
-	if err != nil || id == 0 {
-		return 0, ErrInvalidInput
+func parseID(c echo.Context) (string, error) {
+	id := c.Param("id")
+	if id == "" {
+		return "", ErrInvalidInput
 	}
-	return uint(id), nil
+	return id, nil
 }

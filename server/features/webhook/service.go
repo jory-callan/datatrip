@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"czwlinux.cloud/go-friday-starter/global"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
@@ -20,9 +21,8 @@ var (
 	ErrInvalidInput = errors.New("invalid input")
 )
 
-func ListWebhooksService(ctx context.Context, query ListQuery) ([]*DTO, int64, error) {
-	query.Normalize()
-	items, total, err := ListWebhooks(ctx, query)
+func ListWebhooksService(ctx context.Context, pq response.PageQuery, filters map[string]string) ([]*DTO, int64, error) {
+	items, total, err := ListWebhooks(ctx, pq, filters)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -33,8 +33,8 @@ func ListWebhooksService(ctx context.Context, query ListQuery) ([]*DTO, int64, e
 	return result, total, nil
 }
 
-func GetWebhookService(ctx context.Context, id uint) (*DTO, error) {
-	if id == 0 {
+func GetWebhookService(ctx context.Context, id string) (*DTO, error) {
+	if id == "" {
 		return nil, ErrInvalidInput
 	}
 	w, err := GetWebhookByID(ctx, id)
@@ -75,8 +75,8 @@ func CreateWebhookService(ctx context.Context, req CreateRequest) (*DTO, error) 
 	return GetWebhookService(ctx, w.ID)
 }
 
-func UpdateWebhookService(ctx context.Context, id uint, req UpdateRequest) (*DTO, error) {
-	if id == 0 {
+func UpdateWebhookService(ctx context.Context, id string, req UpdateRequest) (*DTO, error) {
+	if id == "" {
 		return nil, ErrInvalidInput
 	}
 	w, err := GetWebhookByID(ctx, id)
@@ -104,8 +104,8 @@ func UpdateWebhookService(ctx context.Context, id uint, req UpdateRequest) (*DTO
 	return GetWebhookService(ctx, w.ID)
 }
 
-func DeleteWebhookService(ctx context.Context, id uint) error {
-	if id == 0 {
+func DeleteWebhookService(ctx context.Context, id string) error {
+	if id == "" {
 		return ErrInvalidInput
 	}
 	err := DeleteWebhookByID(ctx, id)
@@ -116,6 +116,7 @@ func DeleteWebhookService(ctx context.Context, id uint) error {
 }
 
 // SendWebhook sends an HTTP POST to all matching webhooks for the given event.
+
 func SendWebhook(ctx context.Context, event string, payload interface{}) {
 	webhooks, err := ListEnabledWebhooksByEvent(ctx, event)
 	if err != nil {

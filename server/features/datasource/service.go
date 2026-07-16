@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"czwlinux.cloud/go-friday-starter/global"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
+	"czwlinux.cloud/go-friday-starter/pkg/pipeline"
 	"gorm.io/gorm"
 )
 
@@ -14,9 +16,8 @@ var (
 	ErrInvalidInput = errors.New("invalid input")
 )
 
-func ListDatasources(ctx context.Context, query ListQuery) ([]*DTO, int64, error) {
-	query.Normalize()
-	items, total, err := List(ctx, query)
+func ListDatasources(ctx context.Context, pq response.PageQuery, filters map[string]string) ([]*DTO, int64, error) {
+	items, total, err := List(ctx, pq, filters)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -27,8 +28,8 @@ func ListDatasources(ctx context.Context, query ListQuery) ([]*DTO, int64, error
 	return result, total, nil
 }
 
-func GetDatasource(ctx context.Context, id uint) (*DTO, error) {
-	if id == 0 {
+func GetDatasource(ctx context.Context, id string) (*DTO, error) {
+	if id == "" {
 		return nil, ErrInvalidInput
 	}
 	d, err := GetByID(ctx, id)
@@ -54,16 +55,20 @@ func CreateDatasource(ctx context.Context, req CreateRequest) (*DTO, error) {
 		return nil, ErrInvalidInput
 	}
 
+	// Auto-fill type group from built-in mapping
+	typeGroup := string(pipeline.GetTypeGroup(dsType))
+
 	d := &Datasource{
-		Name:     name,
-		Type:     dsType,
-		Host:     host,
-		Port:     req.Port,
-		Username: username,
-		Password: req.Password,
-		Database: req.Database,
-		Remark:   req.Remark,
-		Status:   StatusDisconnected,
+		Name:      name,
+		Type:      dsType,
+		TypeGroup: typeGroup,
+		Host:      host,
+		Port:      req.Port,
+		Username:  username,
+		Password:  req.Password,
+		Database:  req.Database,
+		Remark:    req.Remark,
+		Status:    StatusDisconnected,
 	}
 	if err := Create(ctx, d); err != nil {
 		return nil, err
@@ -71,8 +76,8 @@ func CreateDatasource(ctx context.Context, req CreateRequest) (*DTO, error) {
 	return GetDatasource(ctx, d.ID)
 }
 
-func UpdateDatasource(ctx context.Context, id uint, req UpdateRequest) (*DTO, error) {
-	if id == 0 {
+func UpdateDatasource(ctx context.Context, id string, req UpdateRequest) (*DTO, error) {
+	if id == "" {
 		return nil, ErrInvalidInput
 	}
 	d, err := GetByID(ctx, id)
@@ -106,7 +111,6 @@ func UpdateDatasource(ctx context.Context, id uint, req UpdateRequest) (*DTO, er
 	// 连接信息变更后重置状态为 disconnected
 	if req.Host != "" || req.Port > 0 || req.Username != "" || req.Password != "" {
 		d.Status = StatusDisconnected
-		// 关闭旧连接池
 		global.DB.WithContext(ctx).Model(d).Update("status", StatusDisconnected)
 	}
 
@@ -116,8 +120,8 @@ func UpdateDatasource(ctx context.Context, id uint, req UpdateRequest) (*DTO, er
 	return GetDatasource(ctx, d.ID)
 }
 
-func DeleteDatasource(ctx context.Context, id uint) error {
-	if id == 0 {
+func DeleteDatasource(ctx context.Context, id string) error {
+	if id == "" {
 		return ErrInvalidInput
 	}
 	err := DeleteByID(ctx, id)
@@ -125,4 +129,17 @@ func DeleteDatasource(ctx context.Context, id uint) error {
 		return ErrNotFound
 	}
 	return err
+}
+
+func BatchDeleteDatasource(ctx context.Context, ids []string) error {
+	cleanIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if strings.TrimSpace(id) != "" {
+			cleanIDs = append(cleanIDs, strings.TrimSpace(id))
+		}
+	}
+	if len(cleanIDs) == 0 {
+		return ErrInvalidInput
+	}
+	return DeleteByIDs(ctx, cleanIDs)
 }

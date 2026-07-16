@@ -4,16 +4,15 @@ import (
 	"time"
 
 	"czwlinux.cloud/go-friday-starter/features/audit"
-	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
 )
 
 type DTO struct {
-	ID              uint       `json:"id"`
-	ProjectID       uint       `json:"project_id"`
-	ApplicantID     uint       `json:"applicant_id"`
+	ID              string     `json:"id"`
+	ProjectID       string     `json:"project_id"`
+	ApplicantID     string     `json:"applicant_id"`
 	Title           string     `json:"title"`
 	Description     string     `json:"description"`
-	SqlSnapshot     string     `json:"sql_snapshot"`
+	InstructionJSON string     `json:"instruction_json"`
 	Status          string     `json:"status"`
 	ApprovalMode    string     `json:"approval_mode"`
 	ExecutionStatus string     `json:"execution_status"`
@@ -24,9 +23,9 @@ type DTO struct {
 }
 
 type ApprovalRecordDTO struct {
-	ID         uint      `json:"id"`
-	TicketID   uint      `json:"ticket_id"`
-	ApproverID uint      `json:"approver_id"`
+	ID         string    `json:"id"`
+	TicketID   string    `json:"ticket_id"`
+	ApproverID string    `json:"approver_id"`
 	Action     string    `json:"action"`
 	Comment    string    `json:"comment"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -38,23 +37,16 @@ type TicketDetail struct {
 	Audits    []*audit.DTO         `json:"audits"`
 }
 
-type ListQuery struct {
-	response.PageQuery
-	Scope     string `query:"scope" json:"scope"`           // my | pending | all
-	Status    string `query:"status" json:"status"`
-	ProjectID uint   `query:"project_id" json:"project_id"`
-}
-
 type ApproveRequest struct {
 	Comment string `json:"comment"`
 }
 
 type CreateTicketRequest struct {
-	ProjectID    uint   `json:"project_id"`
-	SqlSnapshot  string `json:"sql_snapshot"`
-	ApprovalMode string `json:"approval_mode"`
-	Title        string `json:"title"`
-	Description  string `json:"description"`
+	ProjectID       string `json:"project_id"`
+	InstructionJSON string `json:"instruction_json"`
+	ApprovalMode    string `json:"approval_mode"`
+	Title           string `json:"title"`
+	Description     string `json:"description"`
 }
 
 func ToDTO(t *Ticket) *DTO {
@@ -67,7 +59,7 @@ func ToDTO(t *Ticket) *DTO {
 		ApplicantID:     t.ApplicantID,
 		Title:           t.Title,
 		Description:     t.Description,
-		SqlSnapshot:     t.SqlSnapshot,
+		InstructionJSON: t.InstructionJSON,
 		Status:          t.Status,
 		ApprovalMode:    t.ApprovalMode,
 		ExecutionStatus: t.ExecutionStatus,

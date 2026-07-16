@@ -23,7 +23,7 @@ export function TabExecuteBar({
   onFormat,
 }: {
   tab: EditorTab
-  projects: { id: number; name: string }[]
+  projects: { id: string; name: string }[]
   isExecuting: boolean
   isEscalationActive: boolean
   onUpdateTab: (updates: Partial<EditorTab>) => void
@@ -46,10 +46,9 @@ export function TabExecuteBar({
       <div className="flex items-center gap-1">
         <span className="text-xs text-muted-foreground shrink-0">{'选择项目'}</span>
         <Select
-          value={tab.projectId?.toString() ?? ''}
+          value={tab.projectId ?? ''}
           onValueChange={(val) => {
-            const pid = Number(val)
-            onUpdateTab({ projectId: pid, database: undefined })
+            onUpdateTab({ projectId: val, database: undefined })
           }}
         >
           <SelectTrigger className="h-7 w-[140px] text-xs border-primary/20 focus:border-primary">
@@ -57,7 +56,7 @@ export function TabExecuteBar({
           </SelectTrigger>
           <SelectContent>
             {projects.map((p) => (
-              <SelectItem key={p.id} value={p.id.toString()} className="text-xs">
+              <SelectItem key={p.id} value={p.id} className="text-xs">
                 {p.name}
               </SelectItem>
             ))}

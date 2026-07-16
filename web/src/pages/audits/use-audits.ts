@@ -1,8 +1,3 @@
-import { useMemo, useState } from 'react'
-
-import { useProjects } from '@/lib/api/projects'
-import { useAudits } from '@/lib/api/audits'
-
 export const ACTION_LABEL: Record<string, string> = {
   all: '全部',
   execute: 'SQL 执行',
@@ -47,64 +42,9 @@ export const CLASSIFICATION_OPTIONS = [
   { value: 'write', label: CLASSIFICATION_LABEL.write },
 ]
 
-export function useAuditsPage() {
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
-  const [actionFilter, setActionFilter] = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [classificationFilter, setClassificationFilter] = useState('')
-  const [projectFilter, setProjectFilter] = useState<string>('')
-  const [startDate, setStartDate] = useState(() => {
-    const today = new Date()
-    return today.toISOString().slice(0, 10)
-  })
-  const [endDate, setEndDate] = useState('')
-  const [expandedRow, setExpandedRow] = useState<number | null>(null)
-
-  const projectsQuery = useProjects({ page: 1, pageSize: 200, needCount: false })
-  const projects = projectsQuery.data?.list ?? []
-
-  const query = useAudits({
-    page,
-    pageSize,
-    needCount: false,
-    action: actionFilter && actionFilter !== 'all' ? actionFilter : undefined,
-    status: statusFilter && statusFilter !== 'all' ? statusFilter : undefined,
-    classification: classificationFilter && classificationFilter !== 'all' ? classificationFilter : undefined,
-    project_id: projectFilter ? Number(projectFilter) : undefined,
-    start_time: startDate || undefined,
-    end_time: endDate || undefined,
-  })
-  const { data, refetch } = query
-
-  const expandedAudit = useMemo(() => {
-    if (expandedRow == null) return null
-    return data?.list?.find((a) => a.id === expandedRow) ?? null
-  }, [data?.list, expandedRow])
-
-  const toggleExpand = (id: number) => {
-    setExpandedRow(expandedRow === id ? null : id)
-  }
-
-  const setFilterAction = (v: string) => { setActionFilter(v); setPage(1) }
-  const setFilterStatus = (v: string) => { setStatusFilter(v); setPage(1) }
-  const setFilterClassification = (v: string) => { setClassificationFilter(v); setPage(1) }
-  const setFilterProject = (v: string) => { setProjectFilter(v); setPage(1) }
-  const setFilterStartDate = (v: string) => { setStartDate(v); setPage(1) }
-  const setFilterEndDate = (v: string) => { setEndDate(v); setPage(1) }
-
-  return {
-    page, setPage,
-    pageSize, setPageSize,
-    actionFilter, statusFilter, projectFilter,
-    classificationFilter,
-    startDate, endDate,
-    expandedRow, expandedAudit,
-    projects, query, data,
-    toggleExpand, refetch,
-    setFilterAction, setFilterStatus, setFilterProject,
-    setFilterClassification,
-    setFilterStartDate, setFilterEndDate,
-    setExpandedRow,
-  }
-}
+export const DATE_RANGE_OPTIONS = [
+  { value: 'today', label: '今天' },
+  { value: '7d', label: '最近 7 天' },
+  { value: '30d', label: '最近 30 天' },
+  { value: '90d', label: '最近 90 天' },
+] as const

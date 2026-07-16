@@ -3,17 +3,32 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { apiClient } from '../api-client'
 
 export interface Datasource {
-  id: number
+  id: string
   name: string
   type: string
+  type_group: string
   host: string
   port: number
   username: string
   remark?: string
+  password_saved: boolean
   status: string
   created_at: string
   updated_at: string
 }
+
+export interface DatasourceTypeInfo {
+  type: string
+  label: string
+}
+
+export interface DatasourceTypeGroup {
+  group: string
+  label: string
+  types: DatasourceTypeInfo[]
+}
+
+export type DatasourceTypesResponse = DatasourceTypeGroup[]
 
 export interface DatasourceListParams {
   page: number
@@ -36,20 +51,22 @@ export interface CreateDatasourceInput {
   port: number
   username: string
   password: string
-  database?: string
   remark?: string
 }
 
 export interface UpdateDatasourceInput {
-  id: number
-  name: string
-  type: string
-  host: string
-  port: number
-  username: string
+  id: string
+  name?: string
+  type?: string
+  host?: string
+  port?: number
+  username?: string
   password?: string
-  database?: string
   remark?: string
+}
+
+export interface BatchDeleteRequest {
+  ids: string[]
 }
 
 export const useDatasources = ({ page, pageSize, needCount = true, keyword }: DatasourceListParams) => {
@@ -64,6 +81,14 @@ export const useDatasources = ({ page, pageSize, needCount = true, keyword }: Da
       },
     }),
     placeholderData: keepPreviousData,
+  })
+}
+
+export const useDatasourceTypes = () => {
+  return useQuery({
+    queryKey: ['datasource-types'],
+    queryFn: () => apiClient<DatasourceTypesResponse>('/datasource-types'),
+    staleTime: 24 * 60 * 60 * 1000,
   })
 }
 
@@ -91,7 +116,7 @@ export const useUpdateDatasource = () => {
 
 export const useTestDatasource = () => {
   return useMutation({
-    mutationFn: (id: number) => apiClient<{ success: boolean; message: string }>(`/datasources/${id}/test`, {
+    mutationFn: (id: string) => apiClient<{ success: boolean; message: string }>(`/datasources/${id}/test`, {
       method: 'POST',
     }),
   })
@@ -100,7 +125,18 @@ export const useTestDatasource = () => {
 export const useDeleteDatasource = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: number) => apiClient<null>(`/datasources/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => apiClient<null>(`/datasources/${id}`, { method: 'DELETE' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['datasources'] }),
+  })
+}
+
+export const useBatchDeleteDatasource = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: string[]) => apiClient<null>('/datasources/batch-delete', {
+      method: 'POST',
+      body: { ids },
+    }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['datasources'] }),
   })
 }

@@ -3,26 +3,59 @@ package auth
 import (
 	"context"
 
-	"czwlinux.cloud/go-friday-starter/features/user"
-	"czwlinux.cloud/go-friday-starter/global"
-	"go.uber.org/zap"
+	"czwlinux.cloud/go-friday-starter/pkg/authctx"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
+	"github.com/labstack/echo/v4"
 )
 
-// CheckPermissionByID 统一权限判断入口
-// 所有 handler 应通过此函数判断用户角色权限，不自行查询用户表
-func CheckPermissionByID(ctx context.Context, userID uint, allowedCodes ...string) bool {
-	if userID == 0 {
+// CheckPermissionByID 统一权限判断入口。
+// 检查用户是否拥有 requiredCode 对应权限。
+func CheckPermissionByID(ctx context.Context, userID string, requiredCode string) bool {
+	if userID == "" {
 		return false
 	}
-	u, err := user.GetByID(ctx, userID)
+	ok, err := CheckUserPermission(ctx, userID, requiredCode)
 	if err != nil {
-		global.Log.Warn("permission check: user not found", zap.Uint("user_id", userID))
 		return false
 	}
-	for _, code := range allowedCodes {
-		if u.RoleCode == code {
-			return true
+	return ok
+}
+
+// RequirePermission 返回 Echo 中间件，校验当前用户是否拥有指定权限码。
+func RequirePermission(code string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			userID, ok := authctx.CurrentUserID(c)
+			if !ok {
+				return response.Unauthorized(c, "unauthorized")
+			}
+			if !CheckPermissionByID(c.Request().Context(), userID, code) {
+				return response.Forbidden(c, "forbidden")
+			}
+			return next(c)
 		}
 	}
-	return false
+}
+
+// Deprecated: RequireRole 保持向后兼容，实际使用 RequirePermission 替换。
+// 参数 allowedCodes 被视为权限码列表（任一匹配即放行）。
+func RequireRole(allowedCodes ...string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			userID, ok := authctx.CurrentUserID(c)
+			if !ok {
+				return response.Unauthorized(c, "unauthorized")
+			}
+			codes, err := GetUserPermissionCodes(c.Request().Context(), userID)
+			if err != nil {
+				return response.Forbidden(c, "forbidden")
+			}
+			for _, allowed := range allowedCodes {
+				if HasPermission(codes, allowed) {
+					return next(c)
+				}
+			}
+			return response.Forbidden(c, "forbidden")
+		}
+	}
 }

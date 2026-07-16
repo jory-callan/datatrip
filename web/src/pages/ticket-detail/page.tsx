@@ -97,7 +97,7 @@ export function TicketDetailPage() {
                   {'SQL 快照'}
                 </h3>
                 <pre className="overflow-x-auto rounded-lg bg-gray-900 p-4 text-sm text-green-400">
-                  <code>{ticket.sql_snapshot}</code>
+                  <code>{(() => { try { return JSON.parse(ticket.instruction_json).map((i: any) => i.raw).join('\n') } catch { return ticket.instruction_json } })()}</code>
                 </pre>
               </CardContent>
             </Card>
@@ -307,7 +307,7 @@ export function TicketDetailPage() {
               </div>
               <div>
                 <Label className="text-muted-foreground">{'SQL 快照'}</Label>
-                <pre className="mt-1 rounded bg-gray-900 p-3 text-xs text-green-400 overflow-x-auto max-h-32">{ticket.sql_snapshot}</pre>
+                <pre className="mt-1 rounded bg-gray-900 p-3 text-xs text-green-400 overflow-x-auto max-h-32">{(() => { try { return JSON.parse(ticket.instruction_json).map((i: any) => i.raw).join('\n') } catch { return ticket.instruction_json } })()}</pre>
               </div>
             </div>
           )}

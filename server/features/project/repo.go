@@ -5,64 +5,69 @@ import (
 	"strings"
 
 	"czwlinux.cloud/go-friday-starter/global"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
+	"czwlinux.cloud/go-friday-starter/pkg/queryfilter"
 	"gorm.io/gorm"
 )
 
-func Create(ctx context.Context, p *DbProject) error {
+func Create(ctx context.Context, p *DataProject) error {
 	return global.DB.WithContext(ctx).Create(p).Error
 }
 
-func Save(ctx context.Context, p *DbProject) error {
+func Save(ctx context.Context, p *DataProject) error {
 	return global.DB.WithContext(ctx).Save(p).Error
 }
 
-func GetByID(ctx context.Context, id uint) (*DbProject, error) {
-	var p DbProject
-	if err := global.DB.WithContext(ctx).First(&p, id).Error; err != nil {
+func GetByID(ctx context.Context, id string) (*DataProject, error) {
+	var p DataProject
+	if err := global.DB.WithContext(ctx).Where("id = ?", id).First(&p).Error; err != nil {
 		return nil, err
 	}
 	return &p, nil
 }
 
-func List(ctx context.Context, query ListQuery) ([]DbProject, int64, error) {
-	var items []DbProject
-	var total int64
-	db := global.DB.WithContext(ctx).Model(&DbProject{})
+func List(ctx context.Context, pq response.PageQuery, filters map[string]string) ([]DataProject, int64, error) {
+	var items []DataProject
+	db := global.DB.WithContext(ctx).Model(&DataProject{})
 
-	keyword := strings.TrimSpace(query.Keyword)
-	if keyword != "" {
+	// keyword — 特殊多列搜索
+	if keyword := strings.TrimSpace(filters["keyword"]); keyword != "" {
 		like := "%" + keyword + "%"
 		db = db.Where("name LIKE ?", like)
 	}
-	if query.DatasourceID > 0 {
-		db = db.Where("datasource_id = ?", query.DatasourceID)
-	}
-	if query.ProjectOwnerID > 0 {
-		db = db.Where("id IN (SELECT project_id FROM project_members WHERE user_id = ? AND role = ?)", query.ProjectOwnerID, MemberRoleProjectOwner)
+
+	// 通用 filter（datasource_id）
+	db = queryfilter.ApplyAll(db, filters, map[string]string{
+		"datasource_id": "datasource_id",
+	})
+
+	// project_admin_id — 特殊子查询
+	if adminID := strings.TrimSpace(filters["project_admin_id"]); adminID != "" {
+		db = db.Where("id IN (SELECT project_id FROM data_project_member WHERE user_id = ? AND role = ?)", adminID, MemberRoleAdmin)
 	}
 
-	if query.NeedCount {
-		if err := db.Count(&total).Error; err != nil {
-			return nil, 0, err
-		}
-	}
-	if err := db.Order("id desc").Offset(query.Offset()).Limit(query.PageSize).Find(&items).Error; err != nil {
+	total, err := queryfilter.Paginate(db.Order("id desc"), pq.Page, pq.PageSize, pq.NeedCount, &items)
+	if err != nil {
 		return nil, 0, err
-	}
-	if !query.NeedCount {
-		total = int64(len(items))
 	}
 	return items, total, nil
 }
 
-func DeleteByID(ctx context.Context, id uint) error {
-	return global.DB.WithContext(ctx).Delete(&DbProject{}, id).Error
+func DeleteByID(ctx context.Context, id string) error {
+	return global.DB.WithContext(ctx).Where("id = ?", id).Delete(&DataProject{}).Error
+}
+
+func DeleteByIDs(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return global.DB.WithContext(ctx).Delete(&DataProject{}, ids).Error
 }
 
 // Member queries
 
-func ListMembers(ctx context.Context, projectID uint) ([]ProjectMember, error) {
-	var members []ProjectMember
+func ListMembers(ctx context.Context, projectID string) ([]DataProjectMember, error) {
+	var members []DataProjectMember
 	if err := global.DB.WithContext(ctx).
 		Where("project_id = ?", projectID).
 		Order("id asc").
@@ -72,9 +77,9 @@ func ListMembers(ctx context.Context, projectID uint) ([]ProjectMember, error) {
 	return members, nil
 }
 
-func ReplaceMembers(ctx context.Context, projectID uint, members []ProjectMember) error {
+func ReplaceMembers(ctx context.Context, projectID string, members []DataProjectMember) error {
 	return global.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("project_id = ?", projectID).Delete(&ProjectMember{}).Error; err != nil {
+		if err := tx.Where("project_id = ?", projectID).Delete(&DataProjectMember{}).Error; err != nil {
 			return err
 		}
 		if len(members) > 0 {
@@ -86,8 +91,8 @@ func ReplaceMembers(ctx context.Context, projectID uint, members []ProjectMember
 	})
 }
 
-func GetMemberRole(ctx context.Context, projectID, userID uint) (string, error) {
-	var m ProjectMember
+func GetMemberRole(ctx context.Context, projectID, userID string) (string, error) {
+	var m DataProjectMember
 	if err := global.DB.WithContext(ctx).
 		Where("project_id = ? AND user_id = ?", projectID, userID).
 		First(&m).Error; err != nil {

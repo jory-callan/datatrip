@@ -1,15 +1,51 @@
-
+import { useState } from 'react'
 import { type ColumnDef } from '@tanstack/react-table'
-import { IconEye } from '@tabler/icons-react'
+import { IconDotsVertical, IconEye } from '@tabler/icons-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { formatDateTime, cn } from '@/lib/utils'
 import type { AuditLog } from '@/lib/api/audits'
 
 import { ACTION_LABEL } from './use-audits'
 
-export function useAuditColumns(toggleExpand: (id: number) => void): ColumnDef<AuditLog>[] {
+function ActionDropdown({
+  row,
+  toggleExpand,
+}: {
+  row: AuditLog
+  toggleExpand: (id: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const itemClass =
+    'focus:bg-accent focus:text-accent-foreground relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none w-full [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*="size-"])]:size-4'
+
+  return (
+    <HoverCard open={open} onOpenChange={setOpen} openDelay={0} closeDelay={100}>
+      <HoverCardTrigger asChild>
+        <Button
+          variant="ghost" size="sm"
+          className="h-8 w-8 p-0"
+          onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
+        >
+          <IconDotsVertical className="size-4" />
+        </Button>
+      </HoverCardTrigger>
+      <HoverCardContent align="end" sideOffset={4} className="w-36 p-1">
+        <button
+          type="button"
+          className={itemClass}
+          onClick={() => { setOpen(false); toggleExpand(row.id) }}
+        >
+          <IconEye className="size-4" /> 查看详情
+        </button>
+      </HoverCardContent>
+    </HoverCard>
+  )
+}
+
+export function useAuditColumns(toggleExpand: (id: string) => void): ColumnDef<AuditLog>[] {
 
   return [
     {
@@ -34,15 +70,15 @@ export function useAuditColumns(toggleExpand: (id: number) => void): ColumnDef<A
       meta: { label: '操作类型' },
     },
     {
-      accessorKey: 'sql',
-      header: 'SQL',
+      accessorKey: 'raw_text',
+      header: '原始指令',
       cell: ({ row }) => {
-        const sql = row.original.sql || '-'
+        const text = row.original.raw_text || '-'
         return (
-          <span className="font-mono text-xs">{sql.length > 80 ? `${sql.slice(0, 80)}...` : sql}</span>
+          <span className="font-mono text-xs">{text.length > 80 ? `${text.slice(0, 80)}...` : text}</span>
         )
       },
-      meta: { label: 'SQL' },
+      meta: { label: '原始指令' },
     },
     {
       accessorKey: 'classification',
@@ -108,13 +144,11 @@ export function useAuditColumns(toggleExpand: (id: number) => void): ColumnDef<A
       id: 'actions',
       enableHiding: false,
       header: '操作',
+      size: 64,
       cell: ({ row }) => (
-        <Button variant="ghost" size="sm" onClick={() => toggleExpand(row.original.id)}>
-          <IconEye className="size-4" />
-          {'查看详情'}
-        </Button>
+        <ActionDropdown row={row.original} toggleExpand={toggleExpand} />
       ),
-      meta: { label: '操作' },
+      meta: { label: '操作', pinned: 'right' as const },
     },
   ]
 }

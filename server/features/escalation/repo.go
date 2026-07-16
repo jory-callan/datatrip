@@ -6,25 +6,31 @@ import (
 	"time"
 
 	"czwlinux.cloud/go-friday-starter/global"
+	"czwlinux.cloud/go-friday-starter/pkg/httpx/response"
+	"czwlinux.cloud/go-friday-starter/pkg/queryfilter"
 	"gorm.io/gorm"
 )
 
 var (
-	ErrNotFound        = errors.New("escalation not found")
+	ErrNotFound           = errors.New("escalation not found")
 	ErrNoActiveEscalation = errors.New("no active escalation for this project")
+	ErrForbidden          = errors.New("forbidden")
+	ErrInvalidInput       = errors.New("invalid input")
 )
 
 func Create(ctx context.Context, e *Escalation) error {
 	return global.DB.WithContext(ctx).Create(e).Error
 }
 
-func GetByID(ctx context.Context, id uint) (*Escalation, error) {
+func GetByID(ctx context.Context, id string) (*Escalation, error) {
 	var e Escalation
-	err := global.DB.WithContext(ctx).First(&e, id).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrNotFound
+	if err := global.DB.WithContext(ctx).Where("id = ?", id).First(&e).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
 	}
-	return &e, err
+	return &e, nil
 }
 
 func Save(ctx context.Context, e *Escalation) error {
@@ -32,7 +38,7 @@ func Save(ctx context.Context, e *Escalation) error {
 }
 
 // GetActiveByUserAndProject returns the user's active (approved + not expired) escalation for a project.
-func GetActiveByUserAndProject(ctx context.Context, userID, projectID uint) (*Escalation, error) {
+func GetActiveByUserAndProject(ctx context.Context, userID, projectID string) (*Escalation, error) {
 	var e Escalation
 	err := global.DB.WithContext(ctx).
 		Where("user_id = ? AND project_id = ? AND status = ? AND expires_at > ?",
@@ -45,40 +51,41 @@ func GetActiveByUserAndProject(ctx context.Context, userID, projectID uint) (*Es
 }
 
 // ListByScope lists escalations based on the query scope.
-func ListByScope(ctx context.Context, userID uint, q ListQuery) ([]Escalation, int64, error) {
-	q.Normalize()
+func ListByScope(ctx context.Context, userID string, pq response.PageQuery, filters map[string]string) ([]Escalation, int64, error) {
+	var items []Escalation
 	db := global.DB.WithContext(ctx).Model(&Escalation{})
 
-	switch q.Scope {
+	// scope — 特殊业务逻辑
+	switch filters["scope"] {
 	case "my":
 		db = db.Where("user_id = ?", userID)
 	case "pending":
-		// Pending escalations for projects where user is owner/admin
 		db = db.Where("status = ?", StatusPending)
-	default:
-		// all — no filter
 	}
 
-	if q.ProjectID > 0 {
-		db = db.Where("project_id = ?", q.ProjectID)
-	}
-	if q.Status != "" {
-		db = db.Where("status = ?", q.Status)
-	}
+	// 通用 filter（project_id, status）
+	db = queryfilter.ApplyAll(db, filters, map[string]string{
+		"project_id": "project_id",
+		"status":     "status",
+	})
 
-	var total int64
-	if err := db.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-
-	var items []Escalation
-	if err := db.Order("created_at DESC").
-		Offset(q.Offset()).
-		Limit(q.PageSize).
-		Find(&items).Error; err != nil {
+	total, err := queryfilter.Paginate(db.Order("created_at DESC"), pq.Page, pq.PageSize, pq.NeedCount, &items)
+	if err != nil {
 		return nil, 0, err
 	}
 	return items, total, nil
+}
+
+// DeleteByID soft-deletes an escalation by ID.
+func DeleteByID(ctx context.Context, id string) error {
+	result := global.DB.WithContext(ctx).Where("id = ?", id).Delete(&Escalation{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ExpireStale marks expired approved escalations as expired.

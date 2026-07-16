@@ -24,11 +24,6 @@ export function nextTabId() {
   return ++tabIdCounter
 }
 
-export let historyIdCounter = loadFromStorage<number>('sql-wb-history-counter', 0)
-export function nextHistoryId() {
-  return ++historyIdCounter
-}
-
 export function formatCellValue(val: unknown): string {
   if (val === null || val === undefined) return '<null>'
   if (typeof val === 'object') return JSON.stringify(val)

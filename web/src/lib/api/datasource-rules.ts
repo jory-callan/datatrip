@@ -3,11 +3,13 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { apiClient } from '../api-client'
 
 export interface DatasourceRule {
-  id: number
+  id: string
   name: string
-  db_type: string
+  type_group: string
+  type_scope: string
   category: string
   pattern: string
+  priority: number
   enabled: boolean
   created_at: string
   updated_at: string
@@ -29,18 +31,22 @@ export interface DatasourceRuleListResponse {
 
 export interface CreateDatasourceRuleInput {
   name: string
-  db_type: string
+  type_group?: string
+  type_scope?: string
   category: string
   pattern: string
+  priority?: number
   enabled?: boolean
 }
 
 export interface UpdateDatasourceRuleInput {
-  id: number
-  name: string
-  db_type: string
-  category: string
-  pattern: string
+  id: string
+  name?: string
+  type_group?: string
+  type_scope?: string
+  category?: string
+  pattern?: string
+  priority?: number
   enabled?: boolean
 }
 
@@ -76,6 +82,25 @@ export const useUpdateDatasourceRule = () => {
     mutationFn: ({ id, ...data }: UpdateDatasourceRuleInput) => apiClient<DatasourceRule>(`/datasource-rules/${id}`, {
       method: 'PUT',
       body: data,
+    }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['datasource-rules'] }),
+  })
+}
+
+export const useDeleteDatasourceRule = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => apiClient<void>(`/datasource-rules/${id}`, { method: 'DELETE' }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['datasource-rules'] }),
+  })
+}
+
+export const useBatchDeleteDatasourceRules = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (ids: string[]) => apiClient<void>('/datasource-rules/batch-delete', {
+      method: 'POST',
+      body: { ids },
     }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['datasource-rules'] }),
   })

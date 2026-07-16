@@ -3,7 +3,6 @@ package jwt
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,15 +15,11 @@ var (
 	ErrInvalidUserID = errors.New("invalid user id")
 )
 
-// Claims 是项目默认 JWT Claims。
-// Subject 同步保存 user_id，方便兼容标准 JWT 字段。
 type Claims struct {
-	UserID uint `json:"user_id"`
+	UserID string `json:"user_id"`
 	jwtlib.RegisteredClaims
 }
 
-// Manager 负责签发和解析 JWT。
-// 业务代码通常直接使用 global.JWT。
 type Manager struct {
 	cfg    Config
 	secret []byte
@@ -52,8 +47,8 @@ func MustNew(cfg Config) *Manager {
 	return m
 }
 
-func (m *Manager) Generate(userID uint) (string, error) {
-	if userID == 0 {
+func (m *Manager) Generate(userID string) (string, error) {
+	if userID == "" {
 		return "", ErrInvalidUserID
 	}
 
@@ -61,7 +56,7 @@ func (m *Manager) Generate(userID uint) (string, error) {
 	claims := Claims{
 		UserID: userID,
 		RegisteredClaims: jwtlib.RegisteredClaims{
-			Subject:   strconv.FormatUint(uint64(userID), 10),
+			Subject:   userID,
 			Issuer:    m.cfg.Issuer,
 			IssuedAt:  jwtlib.NewNumericDate(now),
 			NotBefore: jwtlib.NewNumericDate(now),
@@ -92,29 +87,21 @@ func (m *Manager) Parse(tokenString string) (*Claims, error) {
 	if token == nil || !token.Valid {
 		return nil, ErrInvalidToken
 	}
-	if claims.UserID == 0 && claims.Subject != "" {
-		id, err := strconv.ParseUint(claims.Subject, 10, 64)
-		if err != nil || id == 0 {
-			return nil, ErrInvalidUserID
-		}
-		claims.UserID = uint(id)
-	}
-	if claims.UserID == 0 {
+	if claims.UserID == "" {
 		return nil, ErrInvalidUserID
 	}
 
 	return claims, nil
 }
 
-func (m *Manager) UserID(tokenString string) (uint, error) {
+func (m *Manager) UserID(tokenString string) (string, error) {
 	claims, err := m.Parse(tokenString)
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	return claims.UserID, nil
 }
 
-// FromBearer 从 Authorization 请求头中取出 Bearer token。
 func FromBearer(authorization string) (string, error) {
 	authorization = strings.TrimSpace(authorization)
 	if authorization == "" {

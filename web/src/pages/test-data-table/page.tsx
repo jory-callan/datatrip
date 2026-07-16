@@ -1,37 +1,53 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useState } from 'react'
 
-import { DataTable } from '@/components/common/data-table'
+import {
+  Tabs, TabsContent, TabsList, TabsTrigger,
+} from '@/components/ui/tabs'
 
-import { SAMPLE_DATA, getTestColumns } from './columns'
+import { ExampleHost } from './example-host'
+import { EXAMPLES } from './examples'
 
 export function TestDataTablePage() {
+  const [example, setExample] = useState<string>(EXAMPLES[0].key)
+  const current = EXAMPLES.find((e) => e.key === example) ?? EXAMPLES[0]
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-bold">{'DataTable 测试'}</h1>
-        <p className="text-sm text-muted-foreground">{'DataTable 组件功能测试页，展示了列排序、列固定、行选择等特性。'}</p>
+        <h1 className="text-2xl font-bold tracking-tight">DataTable 测试</h1>
+        <p className="text-sm text-muted-foreground">
+          切换 Tab 查看各种用法场景，每个 Tab 展示一个独立示例
+        </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{'用户列表'}</CardTitle>
-          <CardDescription>{'50 条模拟数据，点击列头排序，打开显示列菜单固定列'}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <DataTable
-            columns={getTestColumns()}
-            data={SAMPLE_DATA}
-            storageKey="table:test:data-table"
-            enableRowSelection
-            getRowId={(row) => String(row.id)}
-          />
-        </CardContent>
-      </Card>
+      <Tabs
+        value={example}
+        onValueChange={setExample}
+        className="gap-4"
+      >
+        <TabsList className="flex-wrap h-auto gap-1 justify-start">
+          {EXAMPLES.map((e) => {
+            const Icon = e.icon
+            return (
+              <TabsTrigger key={e.key} value={e.key} className="gap-1.5">
+                <Icon className="size-4" />
+                {e.label}
+              </TabsTrigger>
+            )
+          })}
+        </TabsList>
 
-      <footer className="border-t pt-3 text-center text-xs text-muted-foreground">
-        © {new Date().getFullYear()} Jerry DB Manager · Test Page Footer
-      </footer>
+        {EXAMPLES.map((e) => (
+          <TabsContent key={e.key} value={e.key} className="m-0">
+            <ExampleHost config={e} />
+          </TabsContent>
+        ))}
+      </Tabs>
+
+      <div className="rounded-md border bg-muted/30 p-4 text-xs text-muted-foreground">
+        当前选中：<span className="font-mono text-foreground">{current.key}</span> ·
+        描述：<span className="text-foreground">{current.description}</span>
+      </div>
     </div>
   )
 }

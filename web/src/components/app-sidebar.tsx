@@ -8,7 +8,7 @@ import {
   IconFolder,
   IconLayout2,
   IconLayoutDashboard,
-  IconSettings,
+  IconLock,
   IconShield,
   IconTable,
   IconUser,
@@ -80,6 +80,27 @@ const systemNavItems: NavItem[] = [
     url: '/users',
   },
   {
+    id: 'roles',
+    title: '角色管理',
+    icon: IconShield,
+    url: '/roles',
+  },
+  {
+    id: 'permissions',
+    title: '权限码管理',
+    icon: IconLock,
+    url: '/permissions',
+  },
+  {
+    id: 'webhooks',
+    title: 'Webhook 配置',
+    icon: IconWebhook,
+    url: '/webhooks',
+  },
+]
+
+const resourceNavItems: NavItem[] = [
+  {
     id: 'datasources',
     title: '数据源管理',
     icon: IconDatabase,
@@ -87,7 +108,7 @@ const systemNavItems: NavItem[] = [
   },
   {
     id: 'projects',
-    title: '数据项目管理',
+    title: '项目配置',
     icon: IconFolder,
     url: '/projects',
   },
@@ -96,18 +117,6 @@ const systemNavItems: NavItem[] = [
     title: '数据源规则',
     icon: IconShield,
     url: '/datasource-rules',
-  },
-  {
-    id: 'webhooks',
-    title: 'Webhook',
-    icon: IconWebhook,
-    url: '/webhooks',
-  },
-  {
-    id: 'permissions',
-    title: '权限配置',
-    icon: IconSettings,
-    url: '/permissions',
   },
 ]
 
@@ -132,7 +141,7 @@ const operationsNavItems: NavItem[] = [
   },
 ]
 
-function getNavGroups(userRole?: string): NavGroup[] {
+function getNavGroups(_username?: string): NavGroup[] {
   const groups: NavGroup[] = [
     {
       id: 'main',
@@ -141,13 +150,17 @@ function getNavGroups(userRole?: string): NavGroup[] {
     },
   ]
 
-  // Viewer role: only see main items (overview, sql-workbench, profile)
-  if (userRole === 'viewer') return groups
-
   groups.push(
     {
+      id: 'resources',
+      title: '数据基础',
+      collapsible: true,
+      defaultOpen: true,
+      items: resourceNavItems,
+    },
+    {
       id: 'operations',
-      title: '运维管理',
+      title: '审批管理',
       collapsible: true,
       defaultOpen: true,
       items: operationsNavItems,
@@ -197,8 +210,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   const location = useLocation()
   const { isMobile, setOpenMobile } = useSidebar()
-  const userRole = useAppStore((s) => s.user?.role_code)
-  const navGroups = getNavGroups(userRole)
+  const user = useAppStore((s) => s.user)
+  const navGroups = getNavGroups(user?.username)
 
   const isActive = (url: string) => {
     if (url === '/') {

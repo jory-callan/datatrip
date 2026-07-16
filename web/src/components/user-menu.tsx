@@ -55,7 +55,7 @@ export function UserMenu() {
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium leading-none">{displayName}</p>
             <p className="text-xs leading-none text-muted-foreground">
-              {user?.role_code || '暂无邮箱'}
+              {user?.username || '暂无邮箱'}
             </p>
           </div>
         </DropdownMenuLabel>

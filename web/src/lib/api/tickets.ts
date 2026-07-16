@@ -1,16 +1,15 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { apiClient } from '../api-client'
-
 import type { AuditLog } from './audits'
 
 export interface Ticket {
-  id: number
-  project_id: number
-  applicant_id: number
+  id: string
+  project_id: string
+  applicant_id: string
   title: string
   description: string
-  sql_snapshot: string
+  instruction_json: string
   status: 'pending' | 'approved' | 'rejected' | 'executing' | 'executed' | 'execute_failed'
   approval_mode: 'any_one' | 'all'
   execution_status?: string
@@ -20,9 +19,9 @@ export interface Ticket {
 }
 
 export interface ApprovalRecord {
-  id: number
-  ticket_id: number
-  approver_id: number
+  id: string
+  ticket_id: string
+  approver_id: string
   action: 'approved' | 'rejected' | 'urged'
   comment?: string
   created_at: string
@@ -67,7 +66,7 @@ export const useTickets = ({ page, pageSize, needCount = true, scope, status, pr
   })
 }
 
-export const useTicketDetail = (id: number | null) => {
+export const useTicketDetail = (id: string | null) => {
   return useQuery({
     queryKey: ['ticket-detail', id],
     queryFn: () => apiClient<TicketDetail>(`/tickets/${id}`),
@@ -78,7 +77,7 @@ export const useTicketDetail = (id: number | null) => {
 export const useCreateTicket = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (data: { project_id: number; sql_snapshot: string; title: string; description?: string; approval_mode?: string }) =>
+    mutationFn: (data: { project_id: string; instruction_json: string; title?: string; description?: string }) =>
       apiClient<Ticket>('/tickets', {
         method: 'POST',
         body: data,
@@ -92,7 +91,7 @@ export const useCreateTicket = () => {
 export const useApproveTicket = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, comment }: { id: number; comment?: string }) =>
+    mutationFn: ({ id, comment }: { id: string; comment?: string }) =>
       apiClient<null>(`/tickets/${id}/approve`, {
         method: 'POST',
         body: { comment },
@@ -107,7 +106,7 @@ export const useApproveTicket = () => {
 export const useRejectTicket = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, comment }: { id: number; comment: string }) =>
+    mutationFn: ({ id, comment }: { id: string; comment: string }) =>
       apiClient<null>(`/tickets/${id}/reject`, {
         method: 'POST',
         body: { comment },
@@ -122,7 +121,7 @@ export const useRejectTicket = () => {
 export const useUrgeTicket = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: number) =>
+    mutationFn: (id: string) =>
       apiClient<Ticket>(`/tickets/${id}/urge`, { method: 'POST' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ticket-detail'] })
@@ -133,7 +132,7 @@ export const useUrgeTicket = () => {
 export const useResubmitTicket = () => {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: number; project_id: number; sql_snapshot: string; title: string; description?: string; approval_mode?: string }) =>
+    mutationFn: ({ id, ...data }: { id: string; project_id: string; instruction_json: string; title?: string; description?: string }) =>
       apiClient<Ticket>(`/tickets/${id}/resubmit`, {
         method: 'POST',
         body: data,

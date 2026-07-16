@@ -1,5 +1,5 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { DataTable } from '@/components/common/data-table'
+import { DataTable } from '@/components/data-table'
 import type { ColumnDef } from '@tanstack/react-table'
 
 interface Row {
